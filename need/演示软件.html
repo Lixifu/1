@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title> 唇弓三维设计软件 (U型曲优化版) </title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', 'Helvetica Neue', 'Arial', 'sans-serif', 'Microsoft YaHei';
+            overflow: hidden;  /* 防止滚动条出现 */
+        }
+        #mainCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 5px solid #3498db;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #drag-handle {
+            cursor: grab;
+        }
+        #drag-handle:active {
+            cursor: grabbing;
+        }
+    </style>
+</head>
+<body class="bg-gray-800 text-white">
+
+
+     <!-- 主容器 -->
+    <div id="container" class="w-screen h-screen">
+        <canvas id="mainCanvas"></canvas>
+    </div>
+
+
+     <!-- 参数设置弹出面板 -->
+    <div id="settings-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h3 class="text-xl font-bold mb-4"> 参数设置 </h3>
+            <div class="space-y-4">
+                <div>
+                    <label for="wire-radius-input" class="block text-sm font-medium text-gray-300"> 弓丝直径 (mm) </label>
+                    <input type="number" id="wire-radius-input" step="0.1" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <div>
+                    <label for="marker-radius-input" class="block text-sm font-medium text-gray-300"> 点的直径 (mm) </label>
+                    <input type="number" id="marker-radius-input" step="0.1" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                 <div id="uloop-params">
+                    <div>
+                        <label for="uloop-width-input" class="block text-sm font-medium text-gray-300"> U型曲宽度 (mm) </label>
+                        <input type="number" id="uloop-width-input" step="0.5" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                    <div class="mt-4">
+                        <label for="uloop-height-input" class="block text-sm font-medium text-gray-300"> U型曲高度 (mm) </label>
+                        <input type="number" id="uloop-height-input" step="0.5" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end space-x-3">
+                <button id="cancel-settings" class="bg-gray-600 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-700 transition"> 取消 </button>
+                <button id="save-settings" class="bg-blue-600 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-700 transition"> 保存 </button>
+            </div>
+        </div>
+    </div>
+   
+     <!-- 操作说明弹出面板 -->
+    <div id="help-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-lg">
+            <h3 class="text-xl font-bold mb-4 border-b border-gray-600 pb-2"> 操作说明 </h3>
+            <div class="space-y-3 text-gray-300 text-sm max-h-[60vh] overflow-y-auto pr-2">
+                 <div>
+                    <h4 class="font-semibold text-white mb-1"> 撤销操作 </h4>
+                    <p> 所有关键操作（如加点、移动点、生成U型曲）都支持撤销。点击“撤销”按钮或按 <strong class="text-yellow-300">Ctrl + Z</strong> 可返回上一步。 </p>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-white mb-1"> 1. 加载与导入 </h4>
+                    <p> 点击“加载STL牙模文件”以开始新设计。点击“导入设计 (JSON)”可加载之前保存的设计文件。 </p>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-white mb-1"> 2. 设置参考平面 </h4>
+                    <p> 加载模型后，系统自动进入此模式。在牙模上 <strong class="text-yellow-300"> 单击左键 </strong> 三次以放置三个蓝色控制点，定义参考平面。放置后可拖动控制点进行微调。完成后点击“确认平面”。 </p>
+                </div>
+                 <div>
+                    <h4 class="font-semibold text-white mb-1"> 3. 调整与隐藏平面 </h4>
+                    <p> 确认平面后，可随时点击“调整平面”按钮重新显示控制点并进行修改。点击“隐藏/显示平面”按钮可切换参考平面的可见性。 </p>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-white mb-1"> 4. 设计模式 </h4>
+                    <p> 通过下拉菜单选择不同的设计模式。“自由绘制”模式用于手动创建弓丝路径，“唇弓”模式则是一个引导式的、用于快速生成标准唇弓的流程。 </p>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-white mb-1"> 5. 编辑点 </h4>
+                    <p> 点击“编辑点”激活模式。鼠标悬停于点上光标会变为手形。按住并 <strong class="text-green-400"> 拖动 </strong> 一个点可在牙模表面移动它。在自由绘制模式下， <strong class="text-purple-400"> Shift+单击 </strong> 两个点可选择它们用于生成U型曲。 </p>
+                </div>
+                 <div>
+                    <h4 class="font-semibold text-white mb-1"> 6. 参数设置 </h4>
+                    <p> 点击“设计模式”标题旁的设置图标，可以修改弓丝和标记点的直径，以及U型曲的默认宽高。 </p>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-white mb-1"> 7. 导出数据 </h4>
+                    <p> 设计完成后，在“导出数据”区域设置离散点数，然后点击“导出为JSON”按钮即可下载坐标文件。 </p>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end">
+                <button id="close-help" class="bg-blue-600 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-700 transition"> 关闭 </button>
+            </div>
+        </div>
+    </div>
+
+
+     <!-- UI界面 (可拖动) -->
+    <div id="ui-panel" class="absolute top-0 left-0 p-4 m-4 bg-gray-900 bg-opacity-80 rounded-lg shadow-xl w-full max-w-sm">
+        <div id="drag-handle" class="w-full h-8 mb-2 -mt-2 rounded-t-lg flex items-center justify-center">
+             <div class="w-10 h-1.5 bg-gray-600 rounded-full"></div>
+        </div>
+        <div class="flex justify-between items-center mb-4 border-b border-gray-600 pb-2">
+            <h1 class="text-2xl font-bold text-center flex-1 -mt-2"> 唇弓设计控制器 </h1>
+            <button id="open-help" class="text-gray-400 hover:text-white -mt-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.79 4 4s-1.79 4-4 4-4-1.79-4-4c0-1.193.5-2.268 1.304-3.072M12 15v2.5M12 6.5V7" />
+                </svg>
+            </button>
+        </div>
+
+
+         <!-- 步骤 1: 加载与导入 -->
+        <div class="mb-4">
+            <h2 class="block text-lg font-medium text-gray-300 mb-2"> 1. 文件操作 </h2>
+            <div class="grid grid-cols-2 gap-2">
+                <input type="file" id="stl-loader" class="hidden" accept=".stl"/>
+                <label for="stl-loader" class="block w-full text-center bg-gray-700 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-600 transition cursor-pointer"> 加载模型 (STL) </label>
+               
+                <input type="file" id="json-importer" class="hidden" accept=".json"/>
+                <label for="json-importer" class="block w-full text-center bg-gray-700 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-600 transition cursor-pointer"> 导入设计 (JSON) </label>
+            </div>
+            <div id="loader" class="loader mt-4 hidden mx-auto"></div>
+        </div>
+
+
+         <!-- 视图设置 -->
+        <div id="view-settings-section" class="mb-4 hidden">
+            <div class="flex items-center space-x-3">
+                <label for="opacity-slider" class="text-sm flex-shrink-0"> 牙模透明度: </label>
+                <input id="opacity-slider" type="range" min="0.1" max="1" step="0.05" value="1" class="w-full">
+            </div>
+        </div>
+
+
+         <!-- 步骤 2: 设置参考平面 -->
+        <div id="plane-setup-section" class="mb-4 hidden">
+            <h2 class="text-lg font-medium text-gray-300 mb-2"> 2. 设置参考平面 </h2>
+            <p id="plane-status" class="text-sm text-yellow-400 mb-2"> 请在牙模上点击3个点来定义平面。 </p>
+            <div class="grid grid-cols-2 gap-2">
+                <button id="setup-plane-mode" class="bg-indigo-600 text-white font-bold py-2 px-4 rounded-md hover:bg-indigo-700 transition">
+                    调整平面
+                </button>
+                <button id="confirm-plane" class="bg-gray-600 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-700 transition disabled:opacity-50" disabled>
+                    确认平面
+                </button>
+                <button id="toggle-plane-visibility" class="col-span-2 bg-gray-600 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-700 transition disabled:opacity-50" disabled>
+                    隐藏平面
+                </button>
+            </div>
+        </div>
+
+
+         <!-- 步骤 3: 设计唇弓 -->
+        <div id="design-section" class="mb-4 hidden">
+            <div class="flex justify-between items-center mb-2">
+                 <h2 class="text-lg font-medium text-gray-300"> 3. 设计唇弓 </h2>
+                 <div class="flex items-center space-x-2">
+                    <span id="diameter-display" class="text-xs text-gray-400"></span>
+                    <button id="open-settings" class="text-gray-400 hover:text-white">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311a1.464 1.464 0 0 1-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c-1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34zM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+                        </svg>
+                    </button>
+                 </div>
+            </div>
+            <div class="mb-2">
+                <label for="design-mode-select" class="text-sm font-medium text-gray-400"> 设计模式: </label>
+                <select id="design-mode-select" class="w-full bg-gray-700 border border-gray-600 rounded-md p-1 text-sm text-white mt-1">
+                    <option value="straight"> 自由绘制 (直线) </option>
+                    <option value="smooth"> 自由绘制 (平滑) </option>
+                    <option value="labial_bow"> 唇弓 </option>
+                </select>
+            </div>
+            <p id="status-message" class="text-sm text-yellow-400 mb-2 h-5"> 请选择操作模式。 </p>
+            <div class="grid grid-cols-2 gap-2">
+                <button id="toggle-draw-mode" class="bg-gray-600 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-700 transition"> 开始绘制 </button>
+                <button id="toggle-edit-mode" class="bg-gray-600 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-700 transition"> 编辑点 </button>
+                <button id="generate-uloop" class="bg-blue-600 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-700 transition disabled:opacity-50" disabled> 生成U型曲 </button>
+                <button id="clear-drawing" class="bg-red-600 text-white font-bold py-2 px-4 rounded-md hover:bg-red-700 transition"> 清除全部 </button>
+                <button id="undo-action" class="col-span-2 bg-yellow-600 text-white font-bold py-2 px-4 rounded-md hover:bg-yellow-700 transition disabled:opacity-50" disabled>
+                    撤销 (Ctrl+Z)
+                </button>
+            </div>
+        </div>
+       
+         <!-- 步骤 4: 导出数据 -->
+        <div id="export-section" class="mb-4 hidden">
+            <h2 class="text-lg font-medium text-gray-300 mb-2"> 4. 导出数据 </h2>
+            <div class="flex items-center space-x-3 mb-2">
+                <label for="points-count" class="text-sm"> 离散点数: </label>
+                <input type="number" id="points-count" value="100" class="w-24 bg-gray-700 border border-gray-600 rounded-md p-1 text-center">
+            </div>
+            <button id="export-json" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-md hover:bg-green-700 transition disabled:opacity-50" disabled>
+                导出为JSON
+            </button>
+        </div>
+    </div>
+
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+            }
+        }
+    </script>
+
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { DragControls } from 'three/addons/controls/DragControls.js';
+
+
+         // --- 全局参数 ---
+        let wireRadius = 0.4;
+        let markerRadius = 0.4;
+        let uLoopWidth = 4.0;
+        let uLoopHeight = 6.0;
+        const SELECTION_COLOR_EDIT = 0x00ff00;
+        const SELECTION_COLOR_ULOOP = 0x9932CC;
+
+
+         // --- 全局变量 ---
+        let scene, camera, renderer, orbitControls, dragControls;
+        let dentalModel = null, points = [], archCurveObject = null, pointMarkers = [];
+        let draggableObjects = []; // All draggable markers
+       
+         // --- 模式状态 ---
+        let isDrawingMode = false, isEditMode = false, isPlaneSetupMode = false;
+        let labialBowControlPoints = [];
+       
+         // --- 参考平面变量 ---
+        let planeControlPoints = [], referencePlaneMesh = null, planeDragControls = null;
+        let planeNormal = new THREE.Vector3(0, 1, 0);
+
+
+         // --- 交互变量 ---
+        let isDraggingView = false;
+        let mouseDownPos = new THREE.Vector2();
+        let uLoopSelectionIndices = [];
+        const raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
+       
+         // --- 历史记录栈 ---
+        let historyStack = [];
+
+
+         // --- DOM 元素 ---
+        const canvas = document.getElementById('mainCanvas');
+        const stlLoaderInput = document.getElementById('stl-loader');
+        const jsonImporterInput = document.getElementById('json-importer');
+        const planeSetupSection = document.getElementById('plane-setup-section');
+        const designSection = document.getElementById('design-section');
+        const exportSection = document.getElementById('export-section');
+        const setupPlaneModeBtn = document.getElementById('setup-plane-mode');
+        const confirmPlaneBtn = document.getElementById('confirm-plane');
+        const planeStatus = document.getElementById('plane-status');
+        const toggleDrawModeBtn = document.getElementById('toggle-draw-mode');
+        const toggleEditModeBtn = document.getElementById('toggle-edit-mode');
+        const generateULoopBtn = document.getElementById('generate-uloop');
+        const clearDrawingBtn = document.getElementById('clear-drawing');
+        const exportJsonBtn = document.getElementById('export-json');
+        const statusMessage = document.getElementById('status-message');
+        const loaderSpinner = document.getElementById('loader');
+        const settingsModal = document.getElementById('settings-modal');
+        const openSettingsBtn = document.getElementById('open-settings');
+        const saveSettingsBtn = document.getElementById('save-settings');
+        const cancelSettingsBtn = document.getElementById('cancel-settings');
+        const wireRadiusInput = document.getElementById('wire-radius-input');
+        const markerRadiusInput = document.getElementById('marker-radius-input');
+        const uloopParamsDiv = document.getElementById('uloop-params');
+        const uloopWidthInput = document.getElementById('uloop-width-input');
+        const uloopHeightInput = document.getElementById('uloop-height-input');
+        const diameterDisplay = document.getElementById('diameter-display');
+        const togglePlaneVisibilityBtn = document.getElementById('toggle-plane-visibility');
+        const helpModal = document.getElementById('help-modal');
+        const openHelpBtn = document.getElementById('open-help');
+        const closeHelpBtn = document.getElementById('close-help');
+        const undoBtn = document.getElementById('undo-action');
+        const designModeSelect = document.getElementById('design-mode-select');
+        const viewSettingsSection = document.getElementById('view-settings-section');
+        const opacitySlider = document.getElementById('opacity-slider');
+       
+        function setupDragControls() {
+            if (dragControls) {
+                dragControls.dispose();
+            }
+            dragControls = new DragControls(draggableObjects, camera, renderer.domElement);
+
+
+            dragControls.addEventListener('dragstart', function (event) {
+                orbitControls.enabled = false;
+                event.object.material.color.set(SELECTION_COLOR_EDIT);
+                saveState();
+            });
+
+
+            dragControls.addEventListener('drag', function (event) {
+                // IMPORTANT: This simple drag logic is not enough for U-loops.
+                // A more complex logic would be needed to update the entire U-loop structure
+                // when one of its control points is moved. For now, we just move the point.
+                points[event.object.userData.index].copy(event.object.position);
+                updateArchCurve();
+            });
+
+
+            dragControls.addEventListener('dragend', function (event) {
+                orbitControls.enabled = true;
+                const index = event.object.userData.index;
+                if (uLoopSelectionIndices.includes(index)) {
+                     event.object.material.color.set(SELECTION_COLOR_ULOOP);
+                } else {
+                    event.object.material.color.set(0xff0000);
+                }
+            });
+        }
+
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x2a3b4c);
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 0, 150);
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+           
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            directionalLight.position.set(50, 50, 100);
+            scene.add(directionalLight);
+
+
+            orbitControls = new OrbitControls(camera, renderer.domElement);
+            orbitControls.enableDamping = false;
+
+
+            setupDragControls();
+
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+           
+            canvas.addEventListener('mousedown', onCanvasMouseDown, true); // Use capture phase
+            canvas.addEventListener('mousemove', onCanvasMouseMove, false);
+            canvas.addEventListener('mouseup', onCanvasMouseUp, false);
+            window.addEventListener('keydown', (event) => {
+                if (event.ctrlKey && (event.key === 'z' || event.key === 'Z')) {
+                    undo();
+                }
+            });
+           
+            stlLoaderInput.addEventListener('change', loadSTL);
+            jsonImporterInput.addEventListener('change', importJSON);
+            setupPlaneModeBtn.addEventListener('click', togglePlaneSetupMode);
+            confirmPlaneBtn.addEventListener('click', confirmPlane);
+            toggleDrawModeBtn.addEventListener('click', () => setMode(isDrawingMode ? 'none' : 'draw'));
+            toggleEditModeBtn.addEventListener('click', () => setMode(isEditMode ? 'none' : 'edit'));
+            generateULoopBtn.addEventListener('click', generateULoopFromSelection);
+            clearDrawingBtn.addEventListener('click', clearDrawing);
+            exportJsonBtn.addEventListener('click', exportJSON);
+           
+            openSettingsBtn.addEventListener('click', showSettingsModal);
+            saveSettingsBtn.addEventListener('click', saveSettings);
+            cancelSettingsBtn.addEventListener('click', hideSettingsModal);
+            togglePlaneVisibilityBtn.addEventListener('click', togglePlaneVisibility);
+            openHelpBtn.addEventListener('click', () => helpModal.classList.remove('hidden'));
+            closeHelpBtn.addEventListener('click', () => helpModal.classList.add('hidden'));
+            undoBtn.addEventListener('click', undo);
+            opacitySlider.addEventListener('input', (event) => {
+                if (dentalModel && dentalModel.material) {
+                    dentalModel.material.opacity = parseFloat(event.target.value);
+                }
+            });
+            designModeSelect.addEventListener('change', onDesignModeChange);
+
+
+            updateDiameterDisplay();
+            makePanelDraggable();
+            animate();
+        }
+       
+        function loadSTL(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            loaderSpinner.classList.remove('hidden');
+            if (dentalModel) scene.remove(dentalModel);
+           
+            planeControlPoints.forEach(p => scene.remove(p));
+            planeControlPoints = [];
+            if (referencePlaneMesh) scene.remove(referencePlaneMesh);
+            referencePlaneMesh = null;
+            confirmPlaneBtn.disabled = true;
+            togglePlaneVisibilityBtn.disabled = true;
+            togglePlaneVisibilityBtn.textContent =  '隐藏平面' ;
+           
+            clearDrawing();
+            historyStack = [];
+            undoBtn.disabled = true;
+
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const geometry = new STLLoader().parse(e.target.result);
+                geometry.center();
+                geometry.computeVertexNormals();
+                const material = new THREE.MeshStandardMaterial({
+                    color: 0xeaeaea,
+                    metalness: 0.1,
+                    roughness: 0.6,
+                    transparent: true
+                });
+                dentalModel = new THREE.Mesh(geometry, material);
+                dentalModel.rotation.x = -Math.PI / 2;
+                scene.add(dentalModel);
+                loaderSpinner.classList.add('hidden');
+               
+                viewSettingsSection.classList.remove('hidden');
+                opacitySlider.value = 1;
+
+
+                planeSetupSection.classList.remove('hidden');
+                togglePlaneSetupMode();
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+
+        // --- History Management (Undo) ---
+        function saveState() {
+            const state = {
+                // Deep clone points with their userData
+                points: points.map(p => {
+                    const newP = p.clone();
+                    if (p.userData) {
+                        // Simple object copy is fine here
+                        newP.userData = { ...p.userData };
+                    }
+                    return newP;
+                }),
+                labialBowControlPoints: labialBowControlPoints.map(p => p.clone())
+            };
+            historyStack.push(state);
+            undoBtn.disabled = false;
+        }
+
+
+        function undo() {
+            if (historyStack.length === 0) return;
+            const prevState = historyStack.pop();
+           
+            // Re-clone from the state to prevent mutation issues
+            points = prevState.points.map(p => {
+                const newP = p.clone();
+                if (p.userData) {
+                    newP.userData = { ...p.userData };
+                }
+                return newP;
+            });
+            labialBowControlPoints = prevState.labialBowControlPoints.map(p => p.clone());
+           
+            undoBtn.disabled = historyStack.length === 0;
+           
+            deselectAllPoints();
+           
+            if (designModeSelect.value === 'labial_bow' && typeof constructLabialBow === 'function') {
+                constructLabialBow();
+            } else {
+                redrawScene();
+            }
+        }
+
+
+        // --- Settings Modal Logic ---
+        function showSettingsModal() {
+            wireRadiusInput.value = (wireRadius * 2).toFixed(2);
+            markerRadiusInput.value = (markerRadius * 2).toFixed(2);
+            uloopWidthInput.value = uLoopWidth;
+            uloopHeightInput.value = uLoopHeight;
+            settingsModal.classList.remove('hidden');
+        }
+        function hideSettingsModal() {
+            settingsModal.classList.add('hidden');
+        }
+        function saveSettings() {
+            const newWireDiameter = parseFloat(wireRadiusInput.value);
+            const newMarkerDiameter = parseFloat(markerRadiusInput.value);
+            const newULoopWidth = parseFloat(uloopWidthInput.value);
+            const newULoopHeight = parseFloat(uloopHeightInput.value);
+
+
+            if (!isNaN(newWireDiameter) && newWireDiameter > 0) wireRadius = newWireDiameter / 2;
+            if (!isNaN(newMarkerDiameter) && newMarkerDiameter > 0) markerRadius = newMarkerDiameter / 2;
+            if (!isNaN(newULoopWidth) && newULoopWidth > 0) uLoopWidth = newULoopWidth;
+            if (!isNaN(newULoopHeight) && newULoopHeight > 0) uLoopHeight = newULoopHeight;
+           
+            updateDiameterDisplay();
+            redrawScene();
+            hideSettingsModal();
+        }
+        function updateDiameterDisplay() {
+            diameterDisplay.textContent =  `弓丝直径:  ${(wireRadius * 2).toFixed(2)} mm`;
+        }
+
+
+        // --- Mode Management ---
+        function onDesignModeChange() {
+            clearDrawing();
+            const designMode = designModeSelect.value;
+            generateULoopBtn.style.display = (designMode === 'straight' || designMode === 'smooth') ? 'block' : 'none';
+            setMode('draw');
+        }
+
+
+        function setMode(mode) {
+            isDrawingMode = mode === 'draw';
+            isEditMode = mode === 'edit';
+            isPlaneSetupMode = mode === 'plane';
+
+
+            toggleDrawModeBtn.classList.remove('bg-yellow-600', 'bg-gray-600');
+            toggleEditModeBtn.classList.remove('bg-green-600', 'bg-gray-600');
+           
+            if (isDrawingMode) {
+                toggleDrawModeBtn.classList.add('bg-yellow-600');
+                statusMessage.textContent =  '绘制模式：单击牙模添加点。' ;
+            } else if (isEditMode) {
+                toggleEditModeBtn.classList.add('bg-green-600');
+                statusMessage.textContent =  '编辑模式：拖动点修改，Shift+单击选择点。' ;
+            } else {
+                toggleDrawModeBtn.classList.add('bg-gray-600');
+                toggleEditModeBtn.classList.add('bg-gray-600');
+                 statusMessage.textContent =  '请选择操作模式。' ;
+            }
+            deselectAllPoints();
+        }
+       
+        function clearDrawing() {
+            if (points.length > 0) saveState();
+            points = [];
+            labialBowControlPoints = [];
+           
+            pointMarkers.forEach(marker => scene.remove(marker));
+            pointMarkers = [];
+            draggableObjects = [];
+           
+            if(dragControls) dragControls.dispose();
+            setupDragControls();
+           
+            if (archCurveObject) scene.remove(archCurveObject);
+            archCurveObject = null;
+
+
+            exportJsonBtn.disabled = true;
+            generateULoopBtn.disabled = true;
+            if (!designSection.classList.contains('hidden')) {
+                setMode('none');
+            }
+            updateArchCurve();
+        }
+
+
+        // --- Plane Setup Logic ---
+        function togglePlaneSetupMode() {
+            setMode('plane');
+            planeStatus.textContent =  `请在牙模上点击  ${3 - planeControlPoints.length}  个点来定义平面。` ;
+            if (planeControlPoints.length === 3) {
+                 planeStatus.textContent =  '请拖动控制点调整平面，或点击“确认平面”。' ;
+            }
+           
+            designSection.classList.add('hidden');
+            exportSection.classList.add('hidden');
+            draggableObjects.forEach(p => p.visible = false);
+            if (archCurveObject) archCurveObject.visible = false;
+            planeControlPoints.forEach(p => p.visible = true);
+            if (referencePlaneMesh) {
+                referencePlaneMesh.visible = true;
+                togglePlaneVisibilityBtn.textContent =  '隐藏平面' ;
+            }
+           
+            if (dragControls) dragControls.dispose();
+            planeDragControls = new DragControls(planeControlPoints, camera, renderer.domElement);
+            planeDragControls.addEventListener('dragstart', () => { orbitControls.enabled = false; });
+            planeDragControls.addEventListener('drag', updateReferencePlane);
+            planeDragControls.addEventListener('dragend', () => { orbitControls.enabled = true; });
+        }
+
+
+        function addPlaneControlPoint(position) {
+            if (planeControlPoints.length >= 3) return;
+            const geometry = new THREE.SphereGeometry(0.4, 32, 32);
+            const material = new THREE.MeshBasicMaterial({ color: 0x00FFFF });
+            const point = new THREE.Mesh(geometry, material);
+            point.position.copy(position);
+            scene.add(point);
+            planeControlPoints.push(point);
+            planeStatus.textContent =  `请在牙模上点击  ${3 - planeControlPoints.length}  个点来定义平面。` ;
+
+
+            if (planeControlPoints.length === 3) {
+                updateReferencePlane();
+                confirmPlaneBtn.disabled = false;
+                planeStatus.textContent =  '平面已定义。可拖动控制点调整，或点击“确认平面”。' ;
+            }
+        }
+
+
+        function updateReferencePlane() {
+            if (planeControlPoints.length < 3) return;
+            const [p1, p2, p3] = planeControlPoints.map(p => p.position);
+            const plane = new THREE.Plane().setFromCoplanarPoints(p1, p2, p3);
+            planeNormal.copy(plane.normal);
+            if (!referencePlaneMesh) {
+                const planeGeom = new THREE.PlaneGeometry(200, 200);
+                const planeMat = new THREE.MeshStandardMaterial({ color: 0x00FFFF, opacity: 0.3, transparent: true, side: THREE.DoubleSide });
+                referencePlaneMesh = new THREE.Mesh(planeGeom, planeMat);
+                scene.add(referencePlaneMesh);
+            }
+            referencePlaneMesh.position.copy(p1);
+            referencePlaneMesh.lookAt(p1.clone().add(plane.normal));
+        }
+
+
+        function confirmPlane() {
+            isPlaneSetupMode = false;
+            planeControlPoints.forEach(p => p.visible = false);
+            if (planeDragControls) planeDragControls.dispose();
+            setupDragControls();
+
+
+            designSection.classList.remove('hidden');
+            exportSection.classList.remove('hidden');
+            draggableObjects.forEach(p => p.visible = true);
+            if (archCurveObject) archCurveObject.visible = true;
+            togglePlaneVisibilityBtn.disabled = false;
+            planeStatus.textContent =  '参考平面已确认。' ;
+            setMode('draw');
+        }
+
+
+        function togglePlaneVisibility() {
+            if (referencePlaneMesh) {
+                referencePlaneMesh.visible = !referencePlaneMesh.visible;
+                togglePlaneVisibilityBtn.textContent = referencePlaneMesh.visible ?  '隐藏平面'  :  '显示平面' ;
+            }
+        }
+
+
+        // --- Mouse Events ---
+        function onCanvasMouseDown(event) {
+            if (event.button !== 0) return;
+
+
+            if (isEditMode && event.shiftKey) {
+                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+               
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(draggableObjects);
+
+
+                if (intersects.length > 0) {
+                    handleULoopSelection(intersects[0].object);
+                } else {
+                    deselectAllPoints();
+                }
+               
+                event.stopImmediatePropagation();
+                return;
+            }
+
+
+            isDraggingView = false;
+            mouseDownPos.set(event.clientX, event.clientY);
+        }
+
+
+        function onCanvasMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+           
+            if (event.buttons !== 1) return;
+            if (mouseDownPos.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 5) {
+                isDraggingView = true;
+            }
+        }
+
+
+        function onCanvasMouseUp(event) {
+            if (event.button !== 0) return;
+            if (isDraggingView) return;
+           
+            if (isPlaneSetupMode && planeControlPoints.length < 3) {
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObject(dentalModel);
+                if (intersects.length > 0) {
+                    addPlaneControlPoint(intersects[0].point);
+                }
+            } else if (isDrawingMode) {
+                addPointAtCursor();
+            }
+        }
+
+
+        // --- Core Arch Design Logic ---
+        function generateULoopFromSelection() {
+             if (uLoopSelectionIndices.length !== 2) return;
+            saveState();
+
+
+            const [index1, index2] = uLoopSelectionIndices.sort((a, b) => a - b);
+            const p_start = points[index1];
+            const p_end = points[index2];
+           
+            const p_mid_ref = (index2 - index1 > 1) ? points[Math.floor((index1 + index2) / 2)] : null;
+           
+            const x_hat = new THREE.Vector3().subVectors(p_end, p_start).normalize();
+            let y_hat;
+
+
+            if (p_mid_ref) {
+                statusMessage.textContent =  "使用三点共面为U型曲定向。" ;
+                const v1m = new THREE.Vector3().subVectors(p_mid_ref, p_start);
+                const v_perp = v1m.clone().sub(x_hat.clone().multiplyScalar(v1m.dot(x_hat)));
+                y_hat = (v_perp.lengthSq() < 0.0001) ? new THREE.Vector3().crossVectors(x_hat, planeNormal).normalize() : v_perp.normalize();
+               
+                const curveMidpoint = p_start.clone().lerp(p_end, 0.5);
+                const outVector = new THREE.Vector3().subVectors(p_mid_ref, curveMidpoint);
+                if (y_hat.dot(outVector) < 0) {
+                    y_hat.negate();
+                }
+            } else {
+                statusMessage.textContent =  "注意: 使用参考平面为U型曲定向。" ;
+                y_hat = new THREE.Vector3().crossVectors(x_hat, planeNormal).normalize();
+            }
+
+
+            const uLoopGeometry = generateULoopGeometry(p_start, p_end, y_hat, uLoopHeight);
+           
+            const pointsToRemove = index2 - index1 - 1;
+            points.splice(index1 + 1, pointsToRemove, ...uLoopGeometry);
+           
+            deselectAllPoints();
+            redrawScene();
+        }
+
+
+        function generateULoopGeometry(baseStart, baseEnd, y_hat, height) {
+            const armTopStart = baseStart.clone().add(y_hat.clone().multiplyScalar(height));
+            const armTopEnd = baseEnd.clone().add(y_hat.clone().multiplyScalar(height));
+
+
+            const loopPoints = [];
+
+
+            // Point 1: Semicircle Start (Visible)
+            armTopStart.userData = { type: 'uloop' };
+            loopPoints.push(armTopStart);
+
+
+            const semicircleCenter = armTopStart.clone().lerp(armTopEnd, 0.5);
+            const startVec = new THREE.Vector3().subVectors(armTopStart, semicircleCenter);
+           
+            const x_hat = new THREE.Vector3().subVectors(baseEnd, baseStart).normalize();
+            const z_hat = new THREE.Vector3().crossVectors(x_hat, y_hat).normalize();
+           
+            const numSemicirclePoints = 16; // Total points for the half circle
+            const midPointIndex = Math.floor(numSemicirclePoints / 2);
+
+
+            for (let i = 1; i < numSemicirclePoints; i++) {
+                const angle = -Math.PI * (i / numSemicirclePoints);
+                const point = new THREE.Vector3().copy(startVec).applyAxisAngle(z_hat, angle).add(semicircleCenter);
+               
+                if (i === midPointIndex) {
+                    // Point 2: Semicircle Midpoint (Visible)
+                    point.userData = { type: 'uloop' };
+                } else {
+                    // All other internal points (Hidden)
+                    point.userData = { isULoopInternal: true, type: 'uloop' };
+                }
+                loopPoints.push(point);
+            }
+           
+            // Point 3: Semicircle End (Visible)
+            armTopEnd.userData = { type: 'uloop' };
+            loopPoints.push(armTopEnd);
+           
+            return loopPoints;
+        }
+
+
+        // --- Helper functions ---
+        function handleULoopSelection(marker) {
+            const index = marker.userData.index;
+            const selectionIndex = uLoopSelectionIndices.indexOf(index);
+            if (selectionIndex > -1) {
+                uLoopSelectionIndices.splice(selectionIndex, 1);
+                marker.material.color.set(0xff0000);
+            } else {
+                if (uLoopSelectionIndices.length >= 2) {
+                    const oldIndex = uLoopSelectionIndices.shift();
+                    const oldMarker = draggableObjects.find(m => m.userData.index === oldIndex);
+                    if(oldMarker) oldMarker.material.color.set(0xff0000);
+                }
+                uLoopSelectionIndices.push(index);
+                marker.material.color.set(SELECTION_COLOR_ULOOP);
+            }
+            generateULoopBtn.disabled = uLoopSelectionIndices.length !== 2;
+        }
+        function deselectAllPoints() {
+            uLoopSelectionIndices.forEach(i => {
+                const marker = draggableObjects.find(m => m.userData.index === i);
+                if (marker) marker.material.color.set(0xff0000);
+            });
+            uLoopSelectionIndices = [];
+            generateULoopBtn.disabled = true;
+        }
+        function getOffsetPoint(intersect) {
+            const surfacePoint = intersect.point;
+            const normalMatrix = new THREE.Matrix3().getNormalMatrix(intersect.object.matrixWorld);
+            const worldNormal = intersect.face.normal.clone().applyMatrix3(normalMatrix).normalize();
+            const offsetVector = worldNormal.multiplyScalar(wireRadius);
+            return surfacePoint.clone().add(offsetVector);
+        }
+        function addPointAtCursor() {
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(dentalModel);
+
+
+            if (intersects.length > 0) {
+                saveState();
+                const centerlinePoint = getOffsetPoint(intersects[0]);
+                points.push(centerlinePoint);
+                redrawScene();
+            }
+        }
+        function redrawScene() {
+            // Clean up old markers
+            pointMarkers.forEach(marker => scene.remove(marker));
+            pointMarkers = [];
+            draggableObjects = [];
+
+
+            // Recreate markers based on the current points array
+            points.forEach((p, i) => {
+                addPointMarker(p, i);
+            });
+
+
+            updateArchCurve();
+            setupDragControls(); // Re-setup drag controls for the new set of draggable objects
+        }
+
+
+        function addPointMarker(position, index) {
+            const isULoopInternal = position.userData && position.userData.isULoopInternal;
+
+
+            const markerGeometry = new THREE.SphereGeometry(markerRadius, 16, 16);
+            const isSelectedForULoop = uLoopSelectionIndices.includes(index);
+            const markerMaterial = new THREE.MeshBasicMaterial({ color: isSelectedForULoop ? SELECTION_COLOR_ULOOP : 0xff0000 });
+            const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+            marker.position.copy(position);
+           
+            // Preserve the point's userData in the marker's userData
+            marker.userData = { ...(position.userData || {}), index: index };
+            if (!marker.userData.type) {
+                marker.userData.type = 'normal';
+            }
+
+
+            scene.add(marker);
+            pointMarkers.push(marker); // Keep all markers for easy cleanup
+
+
+            // Only make it visible and draggable if it's not a hidden U-loop point
+            if (isULoopInternal) {
+                marker.visible = false;
+            } else {
+                draggableObjects.push(marker);
+            }
+        }
+
+
+        function updateArchCurve() {
+            if (archCurveObject) {
+                scene.remove(archCurveObject);
+                archCurveObject.geometry.dispose();
+                archCurveObject.material.dispose();
+                archCurveObject = null;
+            }
+
+
+            const currentPoints = points;
+            const hasEnoughPoints = currentPoints.length >= 2;
+            exportJsonBtn.disabled = !hasEnoughPoints;
+
+
+            if (hasEnoughPoints) {
+                const designMode = designModeSelect.value;
+                let curve;
+
+
+                if (designMode === 'smooth' || designMode === 'labial_bow') {
+                     curve = new THREE.CatmullRomCurve3(currentPoints, false, 'catmullrom', 0.5);
+                } else { // 'straight'
+                    const curvePath = new THREE.CurvePath();
+                    for (let i = 0; i < currentPoints.length - 1; i++) {
+                        const lineCurve = new THREE.LineCurve3(currentPoints[i], currentPoints[i+1]);
+                        curvePath.add(lineCurve);
+                    }
+                    curve = curvePath;
+                }
+               
+                if (curve) {
+                    const tubeGeometry = new THREE.TubeGeometry(curve, 256, wireRadius, 12, false);
+                    const tubeMaterial = new THREE.MeshStandardMaterial({ color: 0x00bfff, metalness: 0.5, roughness: 0.2, emissive: 0x112233 });
+                    archCurveObject = new THREE.Mesh(tubeGeometry, tubeMaterial);
+                    scene.add(archCurveObject);
+                }
+            }
+        }
+        function exportJSON() {
+            if (points.length < 1) return;
+            const exportData = {
+                points: points.map(p => ({x: p.x, y: p.y, z: p.z})) // Export clean data without userData
+            };
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' }));
+            a.download = 'arch_design.json';
+            a.click();
+            URL.revokeObjectURL(a.href);
+        }
+       
+        function importJSON(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (data.points && Array.isArray(data.points)) {
+                        points = data.points.map(p => new THREE.Vector3(p.x, p.y, p.z));
+                        redrawScene();
+                        statusMessage.textContent = "设计导入成功。";
+                    } else {
+                        statusMessage.textContent = "导入失败：JSON格式不正确。";
+                    }
+                } catch (error) {
+                    console.error("Error parsing JSON file:", error);
+                    statusMessage.textContent =  "导入失败：无效的JSON文件。" ;
+                }
+            };
+            reader.readAsText(file);
+        }
+
+
+        function makePanelDraggable() {
+            const uiPanel = document.getElementById('ui-panel');
+            const dragHandle = document.getElementById('drag-handle');
+            let offsetX, offsetY, isDraggingPanel = false;
+            dragHandle.addEventListener('mousedown', (e) => {
+                isDraggingPanel = true;
+                offsetX = e.clientX - uiPanel.offsetLeft;
+                offsetY = e.clientY - uiPanel.offsetTop;
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+            });
+            const onMouseMove = (e) => {
+                if (!isDraggingPanel) return;
+                let newX = Math.max(0, Math.min(e.clientX - offsetX, window.innerWidth - uiPanel.offsetWidth));
+                let newY = Math.max(0, Math.min(e.clientY - offsetY, window.innerHeight - uiPanel.offsetHeight));
+                uiPanel.style.left = newX + 'px';
+                uiPanel.style.top = newY + 'px';
+            };
+            const onMouseUp = () => {
+                isDraggingPanel = false;
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+            };
+        }
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+
+
+        init();
+    </script>
+</body>
+</html>
+
+
+
