@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>模块一 · 牙模加载与场景初始化</title>
+    <title>模块一三 · 牙模场景、参考平面与路径设计</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-900 text-white h-screen">
@@ -12,8 +12,8 @@
     </div>
 
     <div id="ui" class="absolute top-0 left-0 m-4 p-4 bg-gray-800/80 rounded-lg shadow w-full max-w-sm">
-        <h1 class="text-xl font-bold mb-3">模块一：文件与场景</h1>
-        <div class="space-y-3">
+        <h1 class="text-xl font-bold mb-3">模块二/三：参考平面与路径设计</h1>
+        <div class="space-y-4">
             <div>
                 <label class="block text-sm mb-1">加载模型（.stl）</label>
                 <input type="file" id="stl-input" accept=".stl" class="block w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700" />
@@ -31,7 +31,33 @@
                 <label for="opacity" class="text-sm">牙模透明度</label>
                 <input id="opacity" type="range" min="0.1" max="1" step="0.05" value="1" class="w-full" />
             </div>
-            <p id="status" class="text-xs text-gray-300 h-5"></p>
+
+            <div class="border-t border-gray-700 pt-3">
+                <h2 class="text-sm font-semibold mb-2">参考平面</h2>
+                <p id="plane-status" class="text-xs text-yellow-300 mb-2">加载模型后，点击牙模表面三次定义平面。</p>
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="enter-plane-mode" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>调整平面</button>
+                    <button id="confirm-plane" class="bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>确认平面</button>
+                    <button id="toggle-plane-visibility" class="col-span-2 bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>隐藏平面</button>
+                </div>
+            </div>
+
+            <div class="border-t border-gray-700 pt-3">
+                <h2 class="text-sm font-semibold mb-2">路径设计</h2>
+                <div class="mb-2">
+                    <label class="text-xs mr-2">设计模式</label>
+                    <select id="design-mode" class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm">
+                        <option value="straight">自由绘制（直线）</option>
+                        <option value="smooth">自由绘制（平滑）</option>
+                    </select>
+                </div>
+                <p id="status" class="text-xs text-gray-300 h-5 mb-2">请选择操作模式。</p>
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="toggle-draw" class="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>开始绘制</button>
+                    <button id="toggle-edit" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>编辑点</button>
+                    <button id="clear-all" class="col-span-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-3 rounded" disabled>清除全部</button>
+                </div>
+            </div>
         </div>
     </div>
 
