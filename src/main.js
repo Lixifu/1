@@ -45,11 +45,25 @@ const toggleEditBtn = document.getElementById('toggle-edit');
 const clearAllBtn = document.getElementById('clear-all');
 const generateUloopBtn = document.getElementById('generate-uloop');
 const undoBtn = document.getElementById('undo');
+const openSettingsBtn = document.getElementById('open-settings');
+const settingsModal = document.getElementById('settings-modal');
+const cancelSettingsBtn = document.getElementById('cancel-settings');
+const saveSettingsBtn = document.getElementById('save-settings');
+const wireDiameterInput = document.getElementById('wire-diameter-input');
+const markerDiameterInput = document.getElementById('marker-diameter-input');
+const uloopWidthInput = document.getElementById('uloop-width-input');
+const uloopHeightInput = document.getElementById('uloop-height-input');
+const uloopEndDistanceInput = document.getElementById('uloop-end-distance-input');
 
-// Geometry params
-const wireRadius = 0.4; // mm (visual tube radius)
-const markerRadius = 0.4; // mm (marker sphere radius)
-const uLoopHeight = 6.0; // mm default height for U-loop arms
+// Geometry params (with defaults from design specs)
+let wireRadius = 0.4; // mm (visual tube radius)
+let markerRadius = 0.4; // mm (marker sphere radius)
+let uLoopWidth = 4.0; // mm U-loop width
+let uLoopHeight = 6.0; // mm U-loop height
+let uLoopEndDistance = 1.0; // mm distance from tissue surface
+
+// Parameter storage key
+const PARAMS_STORAGE_KEY = 'dental_designer_params';
 
 // Interaction helpers
 const raycaster = new THREE.Raycaster();
@@ -93,6 +107,9 @@ function initScene() {
 			undo();
 		}
 	});
+
+	// Load saved parameters
+	loadParameters();
 
 	animate();
 }
@@ -533,17 +550,37 @@ function generateULoopFromSelection() {
 }
 
 function generateULoopGeometry(baseStart, baseEnd, y_hat, height) {
-	const armTopStart = baseStart.clone().add(y_hat.clone().multiplyScalar(height));
-	const armTopEnd = baseEnd.clone().add(y_hat.clone().multiplyScalar(height));
+	// Calculate U-loop width based on distance between endpoints
+	const baseDistance = baseStart.distanceTo(baseEnd);
+	const actualWidth = Math.min(uLoopWidth, baseDistance * 0.8); // Don't exceed 80% of base distance
+	
+	// Calculate arm positions with proper width
+	const x_hat = new THREE.Vector3().subVectors(baseEnd, baseStart).normalize();
+	const widthOffset = x_hat.clone().multiplyScalar(actualWidth / 2);
+	
+	const armStart = baseStart.clone().add(widthOffset);
+	const armEnd = baseEnd.clone().sub(widthOffset);
+	
+	// Add height to arms
+	const armTopStart = armStart.clone().add(y_hat.clone().multiplyScalar(height));
+	const armTopEnd = armEnd.clone().add(y_hat.clone().multiplyScalar(height));
+	
+	// Apply end distance offset (move away from tissue surface)
+	const endOffset = y_hat.clone().multiplyScalar(uLoopEndDistance);
+	armTopStart.add(endOffset);
+	armTopEnd.add(endOffset);
+	
 	const loopPoints = [];
 	armTopStart.userData = { type: 'uloop' };
 	loopPoints.push(armTopStart);
+	
+	// Generate semicircle between arm tops
 	const semicenter = armTopStart.clone().lerp(armTopEnd, 0.5);
 	const startVec = new THREE.Vector3().subVectors(armTopStart, semicenter);
-	const x_hat = new THREE.Vector3().subVectors(baseEnd, baseStart).normalize();
 	const z_hat = new THREE.Vector3().crossVectors(x_hat, y_hat).normalize();
 	const numSemicirclePoints = 16;
 	const midPointIndex = Math.floor(numSemicirclePoints / 2);
+	
 	for (let i = 1; i < numSemicirclePoints; i++) {
 		const angle = -Math.PI * (i / numSemicirclePoints);
 		const point = new THREE.Vector3().copy(startVec).applyAxisAngle(z_hat, angle).add(semicenter);
@@ -554,6 +591,7 @@ function generateULoopGeometry(baseStart, baseEnd, y_hat, height) {
 		}
 		loopPoints.push(point);
 	}
+	
 	armTopEnd.userData = { type: 'uloop' };
 	loopPoints.push(armTopEnd);
 	return loopPoints;
@@ -589,6 +627,69 @@ function undo() {
 	redrawScene();
 }
 
+// Parameter management
+function loadParameters() {
+	try {
+		const saved = localStorage.getItem(PARAMS_STORAGE_KEY);
+		if (saved) {
+			const params = JSON.parse(saved);
+			wireRadius = params.wireRadius || 0.4;
+			markerRadius = params.markerRadius || 0.4;
+			uLoopWidth = params.uLoopWidth || 4.0;
+			uLoopHeight = params.uLoopHeight || 6.0;
+			uLoopEndDistance = params.uLoopEndDistance || 1.0;
+		}
+	} catch (err) {
+		console.warn('Failed to load parameters:', err);
+	}
+}
+
+function saveParameters() {
+	try {
+		const params = {
+			wireRadius,
+			markerRadius,
+			uLoopWidth,
+			uLoopHeight,
+			uLoopEndDistance
+		};
+		localStorage.setItem(PARAMS_STORAGE_KEY, JSON.stringify(params));
+	} catch (err) {
+		console.warn('Failed to save parameters:', err);
+	}
+}
+
+function showSettingsModal() {
+	wireDiameterInput.value = (wireRadius * 2).toFixed(1);
+	markerDiameterInput.value = (markerRadius * 2).toFixed(1);
+	uloopWidthInput.value = uLoopWidth;
+	uloopHeightInput.value = uLoopHeight;
+	uloopEndDistanceInput.value = uLoopEndDistance;
+	settingsModal.classList.remove('hidden');
+}
+
+function hideSettingsModal() {
+	settingsModal.classList.add('hidden');
+}
+
+function saveSettings() {
+	const newWireDiameter = parseFloat(wireDiameterInput.value);
+	const newMarkerDiameter = parseFloat(markerDiameterInput.value);
+	const newULoopWidth = parseFloat(uloopWidthInput.value);
+	const newULoopHeight = parseFloat(uloopHeightInput.value);
+	const newULoopEndDistance = parseFloat(uloopEndDistanceInput.value);
+
+	if (!isNaN(newWireDiameter) && newWireDiameter > 0) wireRadius = newWireDiameter / 2;
+	if (!isNaN(newMarkerDiameter) && newMarkerDiameter > 0) markerRadius = newMarkerDiameter / 2;
+	if (!isNaN(newULoopWidth) && newULoopWidth > 0) uLoopWidth = newULoopWidth;
+	if (!isNaN(newULoopHeight) && newULoopHeight > 0) uLoopHeight = newULoopHeight;
+	if (!isNaN(newULoopEndDistance) && newULoopEndDistance > 0) uLoopEndDistance = newULoopEndDistance;
+
+	saveParameters();
+	redrawScene();
+	hideSettingsModal();
+}
+
 function wireEvents() {
 	stlInput.addEventListener('change', (e) => loadSTLFile(e.target.files?.[0]));
 	jsonImport.addEventListener('change', (e) => importJSONFile(e.target.files?.[0]));
@@ -609,6 +710,9 @@ function wireEvents() {
 	clearAllBtn.addEventListener('click', () => { saveStateIfPoints(); clearDrawing(); });
 	generateUloopBtn.addEventListener('click', () => generateULoopFromSelection());
 	undoBtn.addEventListener('click', () => undo());
+	openSettingsBtn.addEventListener('click', showSettingsModal);
+	cancelSettingsBtn.addEventListener('click', hideSettingsModal);
+	saveSettingsBtn.addEventListener('click', saveSettings);
 	// Design UI locked until plane confirmed
 	disableDesignUI(true);
 }

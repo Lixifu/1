@@ -43,7 +43,14 @@
             </div>
 
             <div class="border-t border-gray-700 pt-3">
-                <h2 class="text-sm font-semibold mb-2">路径设计</h2>
+                <div class="flex justify-between items-center mb-2">
+                    <h2 class="text-sm font-semibold">路径设计</h2>
+                    <button id="open-settings" class="text-gray-400 hover:text-white">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311a1.464 1.464 0 0 1-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34zM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+                        </svg>
+                    </button>
+                </div>
                 <div class="mb-2">
                     <label class="text-xs mr-2">设计模式</label>
                     <select id="design-mode" class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm">
@@ -60,6 +67,44 @@
                     <button id="undo" class="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>撤销（Ctrl+Z）</button>
                     <button id="clear-all" class="col-span-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-3 rounded" disabled>清除全部</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Parameters Settings Modal -->
+    <div id="settings-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+        <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h3 class="text-xl font-bold mb-4">参数设置</h3>
+            <div class="space-y-4">
+                <div>
+                    <label for="wire-diameter-input" class="block text-sm font-medium text-gray-300">弓丝直径 (mm)</label>
+                    <input type="number" id="wire-diameter-input" step="0.1" min="0.1" max="2.0" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <div>
+                    <label for="marker-diameter-input" class="block text-sm font-medium text-gray-300">点的直径 (mm)</label>
+                    <input type="number" id="marker-diameter-input" step="0.1" min="0.1" max="2.0" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <div class="border-t border-gray-600 pt-4">
+                    <h4 class="text-sm font-medium text-gray-300 mb-3">U型曲参数</h4>
+                    <div class="space-y-3">
+                        <div>
+                            <label for="uloop-width-input" class="block text-sm font-medium text-gray-300">U型曲宽度 (mm)</label>
+                            <input type="number" id="uloop-width-input" step="0.5" min="1.0" max="10.0" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label for="uloop-height-input" class="block text-sm font-medium text-gray-300">U型曲高度 (mm)</label>
+                            <input type="number" id="uloop-height-input" step="0.5" min="2.0" max="15.0" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label for="uloop-end-distance-input" class="block text-sm font-medium text-gray-300">末端离组织面距离 (mm)</label>
+                            <input type="number" id="uloop-end-distance-input" step="0.1" min="0.5" max="2.0" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end space-x-3">
+                <button id="cancel-settings" class="bg-gray-600 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-700 transition">取消</button>
+                <button id="save-settings" class="bg-blue-600 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-700 transition">保存</button>
             </div>
         </div>
     </div>
