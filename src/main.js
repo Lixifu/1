@@ -21,6 +21,13 @@ let isPlaneMode = false;
 let isDrawingMode = false;
 let isEditMode = false;
 
+// Selection for U-loop
+const SELECTION_COLOR_ULOOP = 0x9932CC;
+let uLoopSelectionIndices = [];
+
+// Undo history
+let historyStack = [];
+
 // UI Elements
 const canvas = document.getElementById('mainCanvas');
 const stlInput = document.getElementById('stl-input');
@@ -36,10 +43,13 @@ const designModeSelect = document.getElementById('design-mode');
 const toggleDrawBtn = document.getElementById('toggle-draw');
 const toggleEditBtn = document.getElementById('toggle-edit');
 const clearAllBtn = document.getElementById('clear-all');
+const generateUloopBtn = document.getElementById('generate-uloop');
+const undoBtn = document.getElementById('undo');
 
-// Geometry params (basic for module two/three)
+// Geometry params
 const wireRadius = 0.4; // mm (visual tube radius)
 const markerRadius = 0.4; // mm (marker sphere radius)
+const uLoopHeight = 6.0; // mm default height for U-loop arms
 
 // Interaction helpers
 const raycaster = new THREE.Raycaster();
@@ -78,6 +88,11 @@ function initScene() {
 	canvas.addEventListener('mousedown', onCanvasMouseDown, true);
 	canvas.addEventListener('mousemove', onCanvasMouseMove, false);
 	canvas.addEventListener('mouseup', onCanvasMouseUp, false);
+	window.addEventListener('keydown', (event) => {
+		if (event.ctrlKey && (event.key === 'z' || event.key === 'Z')) {
+			undo();
+		}
+	});
 
 	animate();
 }
@@ -93,6 +108,7 @@ function loadSTLFile(file) {
 	const reader = new FileReader();
 	setStatus('正在读取STL文件...');
 	resetPlane();
+	saveStateIfPoints();
 	clearDrawing();
 	if (modelMesh) {
 		scene.remove(modelMesh);
@@ -226,6 +242,8 @@ function disableDesignUI(disabled) {
 	toggleDrawBtn.disabled = disabled;
 	toggleEditBtn.disabled = disabled;
 	clearAllBtn.disabled = disabled;
+	generateUloopBtn.disabled = true;
+	undoBtn.disabled = historyStack.length === 0;
 }
 
 function updateModeButtons() {
@@ -237,7 +255,7 @@ function updateModeButtons() {
 		toggleDrawBtn.textContent = '开始绘制';
 	}
 	if (isEditMode) {
-		setStatus('编辑模式：拖动点修改路径。');
+		setStatus('编辑模式：拖动点修改路径。按住Shift单击选择两个端点。');
 	}
 	if (!isDrawingMode && !isEditMode && !isPlaneMode) {
 		setStatus('请选择操作模式。');
@@ -247,6 +265,7 @@ function updateModeButtons() {
 function toggleDrawMode() {
 	isDrawingMode = !isDrawingMode;
 	if (isDrawingMode) isEditMode = false;
+	deselectAllPoints();
 	updateModeButtons();
 }
 
@@ -257,6 +276,7 @@ function toggleEditMode() {
 }
 
 function clearDrawing() {
+	deselectAllPoints();
 	points = [];
 	pointMarkers.forEach(m => scene.remove(m));
 	pointMarkers = [];
@@ -279,6 +299,7 @@ function addPointAtCursor() {
 	raycaster.setFromCamera(mouse, camera);
 	const intersects = raycaster.intersectObject(modelMesh);
 	if (intersects.length === 0) return;
+	saveState();
 	const offsetPoint = getOffsetPoint(intersects[0]);
 	points.push(offsetPoint);
 	redrawScene();
@@ -301,23 +322,30 @@ function redrawScene() {
 	updateArchCurve();
 	setupPointDragControls();
 	updateExportAvailability();
+	updateUndoBtn();
 }
 
 function addPointMarker(position, index) {
+	const isULoopInternal = position.userData && position.userData.isULoopInternal;
+	const isSelected = uLoopSelectionIndices.includes(index);
 	const markerGeometry = new THREE.SphereGeometry(markerRadius, 16, 16);
-	const markerMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+	const markerMaterial = new THREE.MeshBasicMaterial({ color: isSelected ? SELECTION_COLOR_ULOOP : 0xff0000 });
 	const marker = new THREE.Mesh(markerGeometry, markerMaterial);
 	marker.position.copy(position);
-	marker.userData = { index };
+	marker.userData = { ...(position.userData || {}), index };
 	scene.add(marker);
 	pointMarkers.push(marker);
-	draggableObjects.push(marker);
+	if (!isULoopInternal) {
+		draggableObjects.push(marker);
+	} else {
+		marker.visible = false;
+	}
 }
 
 function setupPointDragControls() {
 	if (dragControls) dragControls.dispose();
 	dragControls = new DragControls(draggableObjects, camera, renderer.domElement);
-	dragControls.addEventListener('dragstart', () => { controls.enabled = false; });
+	dragControls.addEventListener('dragstart', () => { controls.enabled = false; saveState(); });
 	dragControls.addEventListener('drag', (event) => {
 		const idx = event.object.userData.index;
 		if (typeof idx === 'number') {
@@ -325,7 +353,15 @@ function setupPointDragControls() {
 			updateArchCurve();
 		}
 	});
-	dragControls.addEventListener('dragend', () => { controls.enabled = true; });
+	dragControls.addEventListener('dragend', (event) => {
+		controls.enabled = true;
+		const idx = event.object.userData.index;
+		if (uLoopSelectionIndices.includes(idx)) {
+			event.object.material.color.set(SELECTION_COLOR_ULOOP);
+		} else {
+			event.object.material.color.set(0xff0000);
+		}
+	});
 }
 
 function updateArchCurve() {
@@ -354,11 +390,15 @@ function updateArchCurve() {
 }
 
 function setMarkersVisibility(visible) {
-	pointMarkers.forEach(m => m.visible = visible);
+	pointMarkers.forEach(m => m.visible = visible && !(m.userData && m.userData.isULoopInternal));
 }
 
 function updateExportAvailability() {
 	exportBtn.disabled = points.length === 0;
+}
+
+function updateUndoBtn() {
+	undoBtn.disabled = historyStack.length === 0;
 }
 
 function exportJSON() {
@@ -378,6 +418,7 @@ function importJSONFile(file) {
 		try {
 			const json = JSON.parse(e.target.result);
 			if (Array.isArray(json.points)) {
+				saveStateIfPoints();
 				points = json.points.map(p => new THREE.Vector3(p.x, p.y, p.z));
 				setStatus('设计导入成功');
 				redrawScene();
@@ -394,6 +435,18 @@ function importJSONFile(file) {
 
 function onCanvasMouseDown(event) {
 	if (event.button !== 0) return;
+	// Selection in edit mode with Shift
+	if (isEditMode && event.shiftKey) {
+		raycaster.setFromCamera(mouse, camera);
+		const intersects = raycaster.intersectObjects(draggableObjects);
+		if (intersects.length > 0) {
+			handleULoopSelection(intersects[0].object);
+		} else {
+			deselectAllPoints();
+		}
+		event.stopImmediatePropagation();
+		return;
+	}
 	isDraggingView = false;
 	mouseDownPos.set(event.clientX, event.clientY);
 }
@@ -422,6 +475,120 @@ function onCanvasMouseUp(event) {
 	}
 }
 
+// U-loop selection and generation
+function handleULoopSelection(marker) {
+	const index = marker.userData.index;
+	const selectionIndex = uLoopSelectionIndices.indexOf(index);
+	if (selectionIndex > -1) {
+		uLoopSelectionIndices.splice(selectionIndex, 1);
+		marker.material.color.set(0xff0000);
+	} else {
+		if (uLoopSelectionIndices.length >= 2) {
+			const oldIndex = uLoopSelectionIndices.shift();
+			const oldMarker = draggableObjects.find(m => m.userData.index === oldIndex);
+			if (oldMarker) oldMarker.material.color.set(0xff0000);
+		}
+		uLoopSelectionIndices.push(index);
+		marker.material.color.set(SELECTION_COLOR_ULOOP);
+	}
+	generateUloopBtn.disabled = uLoopSelectionIndices.length !== 2;
+}
+
+function deselectAllPoints() {
+	uLoopSelectionIndices.forEach(i => {
+		const marker = draggableObjects.find(m => m.userData.index === i);
+		if (marker) marker.material.color.set(0xff0000);
+	});
+	uLoopSelectionIndices = [];
+	generateUloopBtn.disabled = true;
+}
+
+function generateULoopFromSelection() {
+	if (uLoopSelectionIndices.length !== 2) return;
+	saveState();
+	const [index1, index2] = uLoopSelectionIndices.slice().sort((a, b) => a - b);
+	const p_start = points[index1];
+	const p_end = points[index2];
+	const hasMiddle = (index2 - index1 > 1);
+	const p_mid_ref = hasMiddle ? points[Math.floor((index1 + index2) / 2)] : null;
+
+	const x_hat = new THREE.Vector3().subVectors(p_end, p_start).normalize();
+	let y_hat;
+	if (p_mid_ref) {
+		const v1m = new THREE.Vector3().subVectors(p_mid_ref, p_start);
+		const v_perp = v1m.clone().sub(x_hat.clone().multiplyScalar(v1m.dot(x_hat)));
+		y_hat = (v_perp.lengthSq() < 1e-6) ? new THREE.Vector3().crossVectors(x_hat, planeNormal).normalize() : v_perp.normalize();
+		const curveMidpoint = p_start.clone().lerp(p_end, 0.5);
+		const outVector = new THREE.Vector3().subVectors(p_mid_ref, curveMidpoint);
+		if (y_hat.dot(outVector) < 0) y_hat.negate();
+	} else {
+		y_hat = new THREE.Vector3().crossVectors(x_hat, planeNormal).normalize();
+	}
+
+	const newPoints = generateULoopGeometry(p_start, p_end, y_hat, uLoopHeight);
+	const pointsToRemove = index2 - index1 - 1;
+	points.splice(index1 + 1, pointsToRemove, ...newPoints);
+	deselectAllPoints();
+	redrawScene();
+}
+
+function generateULoopGeometry(baseStart, baseEnd, y_hat, height) {
+	const armTopStart = baseStart.clone().add(y_hat.clone().multiplyScalar(height));
+	const armTopEnd = baseEnd.clone().add(y_hat.clone().multiplyScalar(height));
+	const loopPoints = [];
+	armTopStart.userData = { type: 'uloop' };
+	loopPoints.push(armTopStart);
+	const semicenter = armTopStart.clone().lerp(armTopEnd, 0.5);
+	const startVec = new THREE.Vector3().subVectors(armTopStart, semicenter);
+	const x_hat = new THREE.Vector3().subVectors(baseEnd, baseStart).normalize();
+	const z_hat = new THREE.Vector3().crossVectors(x_hat, y_hat).normalize();
+	const numSemicirclePoints = 16;
+	const midPointIndex = Math.floor(numSemicirclePoints / 2);
+	for (let i = 1; i < numSemicirclePoints; i++) {
+		const angle = -Math.PI * (i / numSemicirclePoints);
+		const point = new THREE.Vector3().copy(startVec).applyAxisAngle(z_hat, angle).add(semicenter);
+		if (i === midPointIndex) {
+			point.userData = { type: 'uloop' };
+		} else {
+			point.userData = { isULoopInternal: true, type: 'uloop' };
+		}
+		loopPoints.push(point);
+	}
+	armTopEnd.userData = { type: 'uloop' };
+	loopPoints.push(armTopEnd);
+	return loopPoints;
+}
+
+// Undo stack
+function saveState() {
+	const state = {
+		points: points.map(p => {
+			const np = p.clone();
+			if (p.userData) np.userData = { ...p.userData };
+			return np;
+		})
+	};
+	historyStack.push(state);
+	updateUndoBtn();
+}
+
+function saveStateIfPoints() {
+	if (points.length > 0) saveState();
+}
+
+function undo() {
+	if (historyStack.length === 0) return;
+	const prev = historyStack.pop();
+	points = prev.points.map(p => {
+		const np = p.clone();
+		if (p.userData) np.userData = { ...p.userData };
+		return np;
+	});
+	undoBtn.disabled = historyStack.length === 0;
+	deselectAllPoints();
+	redrawScene();
+}
+
 function wireEvents() {
 	stlInput.addEventListener('change', (e) => loadSTLFile(e.target.files?.[0]));
 	jsonImport.addEventListener('change', (e) => importJSONFile(e.target.files?.[0]));
@@ -439,7 +606,9 @@ function wireEvents() {
 	designModeSelect.addEventListener('change', () => updateArchCurve());
 	toggleDrawBtn.addEventListener('click', () => toggleDrawMode());
 	toggleEditBtn.addEventListener('click', () => toggleEditMode());
-	clearAllBtn.addEventListener('click', () => clearDrawing());
+	clearAllBtn.addEventListener('click', () => { saveStateIfPoints(); clearDrawing(); });
+	generateUloopBtn.addEventListener('click', () => generateULoopFromSelection());
+	undoBtn.addEventListener('click', () => undo());
 	// Design UI locked until plane confirmed
 	disableDesignUI(true);
 }

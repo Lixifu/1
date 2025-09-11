@@ -51,10 +51,13 @@
                         <option value="smooth">自由绘制（平滑）</option>
                     </select>
                 </div>
+                <p class="text-[11px] text-gray-400 mb-1">提示：编辑模式下按Shift并单击点可选择两个端点用于生成U型曲。</p>
                 <p id="status" class="text-xs text-gray-300 h-5 mb-2">请选择操作模式。</p>
                 <div class="grid grid-cols-2 gap-2">
                     <button id="toggle-draw" class="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>开始绘制</button>
                     <button id="toggle-edit" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>编辑点</button>
+                    <button id="generate-uloop" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>生成U型曲</button>
+                    <button id="undo" class="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>撤销（Ctrl+Z）</button>
                     <button id="clear-all" class="col-span-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-3 rounded" disabled>清除全部</button>
                 </div>
             </div>
