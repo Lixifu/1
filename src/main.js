@@ -605,8 +605,9 @@ function generateULoopFromThreePoints(p_start, p_mid, p_end) {
 		y_hat.negate();
 	}
 	
-	// 计算U型曲的高度（从起点-终点连线到最低点的距离）
-	const height = toMidPoint.length();
+	// 计算U型曲的高度（两端端点的中心点到底部端点的距离减去两端端点之间长度的一半）
+	const startToEndDistance = p_start.distanceTo(p_end);
+	const height = toMidPoint.length() - startToEndDistance / 2;
 	
 	// 使用修改后的generateULoopGeometry生成U型曲
 	const newPoints = generateULoopGeometry(p_start, p_end, y_hat, height);
