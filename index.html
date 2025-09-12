@@ -66,13 +66,6 @@
                     <button id="generate-uloop" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>生成U型曲</button>
                     <button id="undo" class="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>撤销（Ctrl+Z）</button>
                     <button id="clear-all" class="col-span-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-3 rounded" disabled>清除全部</button>
-                    <div class="col-span-2 grid grid-cols-3 gap-2 mt-2">
-                        <div class="col-span-2 flex items-center space-x-2">
-                            <label for="ai-samples" class="text-xs">AI采样点数</label>
-                            <input id="ai-samples" type="number" min="50" max="600" step="10" value="200" class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm">
-                        </div>
-                        <button id="ai-generate" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>AI辅助生成</button>
-                    </div>
                 </div>
             </div>
         </div>
@@ -91,23 +84,7 @@
                     <label for="marker-diameter-input" class="block text-sm font-medium text-gray-300">点的直径 (mm)</label>
                     <input type="number" id="marker-diameter-input" step="0.1" min="0.1" max="2.0" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
                 </div>
-                <div class="border-t border-gray-600 pt-4">
-                    <h4 class="text-sm font-medium text-gray-300 mb-3">U型曲参数</h4>
-                    <div class="space-y-3">
-                        <div>
-                            <label for="uloop-width-input" class="block text-sm font-medium text-gray-300">U型曲宽度 (mm)</label>
-                            <input type="number" id="uloop-width-input" step="0.5" min="1.0" max="10.0" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                        </div>
-                        <div>
-                            <label for="uloop-height-input" class="block text-sm font-medium text-gray-300">U型曲高度 (mm)</label>
-                            <input type="number" id="uloop-height-input" step="0.5" min="2.0" max="15.0" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                        </div>
-                        <div>
-                            <label for="uloop-end-distance-input" class="block text-sm font-medium text-gray-300">末端离组织面距离 (mm)</label>
-                            <input type="number" id="uloop-end-distance-input" step="0.1" min="0.5" max="2.0" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                        </div>
-                    </div>
-                </div>
+
             </div>
             <div class="mt-6 flex justify-end space-x-3">
                 <button id="cancel-settings" class="bg-gray-600 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-700 transition">取消</button>

@@ -52,18 +52,11 @@ const cancelSettingsBtn = document.getElementById('cancel-settings');
 const saveSettingsBtn = document.getElementById('save-settings');
 const wireDiameterInput = document.getElementById('wire-diameter-input');
 const markerDiameterInput = document.getElementById('marker-diameter-input');
-const uloopWidthInput = document.getElementById('uloop-width-input');
-const uloopHeightInput = document.getElementById('uloop-height-input');
-const uloopEndDistanceInput = document.getElementById('uloop-end-distance-input');
-const aiSamplesInput = document.getElementById('ai-samples');
-const aiGenerateBtn = document.getElementById('ai-generate');
+// Removed U-loop parameters
 
 // Geometry params (with defaults from design specs)
 let wireRadius = 0.4; // mm (visual tube radius)
 let markerRadius = 0.4; // mm (marker sphere radius)
-let uLoopWidth = 4.0; // mm U-loop width
-let uLoopHeight = 6.0; // mm U-loop height
-let uLoopEndDistance = 1.0; // mm distance from tissue surface
 
 // Parameter storage key
 const PARAMS_STORAGE_KEY = 'dental_designer_params';
@@ -264,7 +257,6 @@ function disableDesignUI(disabled) {
 	clearAllBtn.disabled = disabled;
 	generateUloopBtn.disabled = true;
 	undoBtn.disabled = historyStack.length === 0;
-	aiGenerateBtn.disabled = true;
 }
 
 function updateModeButtons() {
@@ -344,7 +336,6 @@ function redrawScene() {
 	setupPointDragControls();
 	updateExportAvailability();
 	updateUndoBtn();
-	updateAIAvailability();
 }
 
 function addPointMarker(position, index) {
@@ -413,11 +404,7 @@ function updateExportAvailability() {
 	exportBtn.disabled = points.length === 0;
 }
 
-function updateAIAvailability() {
-	const hasPlane = planeControlPoints.length === 3 || !!referencePlaneMesh;
-	aiGenerateBtn.disabled = !(modelMesh && hasPlane && points.length >= 3);
-	if (!aiSamplesInput.value) aiSamplesInput.value = 200;
-}
+
 
 function updateUndoBtn() {
 	undoBtn.disabled = historyStack.length === 0;
@@ -565,8 +552,8 @@ function generateULoopGeometry(baseStart, baseEnd, y_hat, height) {
 	const armTopStart = baseStart.clone().add(y_hat.clone().multiplyScalar(height));
 	const armTopEnd = baseEnd.clone().add(y_hat.clone().multiplyScalar(height));
 	
-	// Apply end distance offset (move away from tissue surface)
-	const endOffset = y_hat.clone().multiplyScalar(uLoopEndDistance);
+	// Apply end distance offset (move away from tissue surface) - fixed value since UI was removed
+	const endOffset = y_hat.clone().multiplyScalar(1.0); // Using default value of 1.0mm
 	armTopStart.add(endOffset);
 	armTopEnd.add(endOffset);
 	
@@ -665,9 +652,6 @@ function loadParameters() {
 			const params = JSON.parse(saved);
 			wireRadius = params.wireRadius || 0.4;
 			markerRadius = params.markerRadius || 0.4;
-			uLoopWidth = params.uLoopWidth || 4.0;
-			uLoopHeight = params.uLoopHeight || 6.0;
-			uLoopEndDistance = params.uLoopEndDistance || 1.0;
 		}
 	} catch (err) {
 		console.warn('Failed to load parameters:', err);
@@ -678,10 +662,7 @@ function saveParameters() {
 	try {
 		const params = {
 			wireRadius,
-			markerRadius,
-			uLoopWidth,
-			uLoopHeight,
-			uLoopEndDistance
+			markerRadius
 		};
 		localStorage.setItem(PARAMS_STORAGE_KEY, JSON.stringify(params));
 	} catch (err) {
@@ -692,9 +673,6 @@ function saveParameters() {
 function showSettingsModal() {
 	wireDiameterInput.value = (wireRadius * 2).toFixed(1);
 	markerDiameterInput.value = (markerRadius * 2).toFixed(1);
-	uloopWidthInput.value = uLoopWidth;
-	uloopHeightInput.value = uLoopHeight;
-	uloopEndDistanceInput.value = uLoopEndDistance;
 	settingsModal.classList.remove('hidden');
 }
 
@@ -705,15 +683,9 @@ function hideSettingsModal() {
 function saveSettings() {
 	const newWireDiameter = parseFloat(wireDiameterInput.value);
 	const newMarkerDiameter = parseFloat(markerDiameterInput.value);
-	const newULoopWidth = parseFloat(uloopWidthInput.value);
-	const newULoopHeight = parseFloat(uloopHeightInput.value);
-	const newULoopEndDistance = parseFloat(uloopEndDistanceInput.value);
 
 	if (!isNaN(newWireDiameter) && newWireDiameter > 0) wireRadius = newWireDiameter / 2;
 	if (!isNaN(newMarkerDiameter) && newMarkerDiameter > 0) markerRadius = newMarkerDiameter / 2;
-	if (!isNaN(newULoopWidth) && newULoopWidth > 0) uLoopWidth = newULoopWidth;
-	if (!isNaN(newULoopHeight) && newULoopHeight > 0) uLoopHeight = newULoopHeight;
-	if (!isNaN(newULoopEndDistance) && newULoopEndDistance > 0) uLoopEndDistance = newULoopEndDistance;
 
 	saveParameters();
 	redrawScene();
@@ -743,7 +715,6 @@ function wireEvents() {
 	openSettingsBtn.addEventListener('click', showSettingsModal);
 	cancelSettingsBtn.addEventListener('click', hideSettingsModal);
 	saveSettingsBtn.addEventListener('click', saveSettings);
-	aiGenerateBtn.addEventListener('click', () => aiGeneratePath());
 	// Design UI locked until plane confirmed
 	disableDesignUI(true);
 }
@@ -760,78 +731,3 @@ function restartIfContextLost() {
 
 initScene();
 wireEvents();
-
-// --- AI-assisted path generation (heuristic based on reference plane) ---
-function aiGeneratePath() {
-	if (!modelMesh) { setStatus('请先加载STL模型。'); return; }
-	if (planeControlPoints.length < 3 && !referencePlaneMesh) { setStatus('请先定义并确认参考平面。'); return; }
-	if (points.length < 3) { setStatus('请至少放置3个关键点。'); return; }
-	const sampleCount = clampInt(parseInt(aiSamplesInput.value, 10), 50, 600);
-	const planePoint = (planeControlPoints[0] ? planeControlPoints[0].position : new THREE.Vector3(0,0,0)).clone();
-	const n = planeNormal.clone().normalize();
-	const basis = buildPlaneBasis(n);
-
-	// 1) Project key points to plane and 2D coordinates
-	const key2D = points.map(p => {
-		const proj = projectPointToPlane(p, planePoint, n);
-		return toPlane2D(proj, planePoint, basis.u, basis.v);
-	});
-	// 2) Fit Catmull-Rom in 2D and sample
-	const curve2D = new THREE.CatmullRomCurve3(key2D.map(pt => new THREE.Vector3(pt.x, pt.y, 0)), false, 'catmullrom', 0.5);
-	const newPoints = [];
-	for (let i = 0; i < sampleCount; i++) {
-		const t = i / (sampleCount - 1);
-		const p2 = curve2D.getPoint(t);
-		const p3 = fromPlane2D({ x: p2.x, y: p2.y }, planePoint, basis.u, basis.v);
-		// 3) Cast along plane normal to find surface, then offset by wire radius
-		const hit = raycastAlongNormal(p3, n);
-		if (hit) {
-			const offset = getOffsetPoint(hit);
-			newPoints.push(offset);
-		} else {
-			// fallback to plane point (with outward offset) if no hit
-			newPoints.push(p3.clone().add(n.clone().multiplyScalar(wireRadius)));
-		}
-	}
-	// apply
-	saveState();
-	points = newPoints;
-	redrawScene();
-	setStatus(`AI生成完成（${sampleCount} 点）。`);
-}
-
-function projectPointToPlane(p, planePoint, normal) {
-	const v = new THREE.Vector3().subVectors(p, planePoint);
-	const dist = v.dot(normal);
-	return p.clone().sub(normal.clone().multiplyScalar(dist));
-}
-
-function buildPlaneBasis(normal) {
-	// choose arbitrary vector not parallel to normal
-	const arbitrary = Math.abs(normal.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
-	const u = new THREE.Vector3().crossVectors(normal, arbitrary).normalize();
-	const v = new THREE.Vector3().crossVectors(normal, u).normalize();
-	return { u, v };
-}
-
-function toPlane2D(p, planePoint, u, v) {
-	const rel = new THREE.Vector3().subVectors(p, planePoint);
-	return { x: rel.dot(u), y: rel.dot(v) };
-}
-
-function fromPlane2D(pt, planePoint, u, v) {
-	return planePoint.clone().add(u.clone().multiplyScalar(pt.x)).add(v.clone().multiplyScalar(pt.y));
-}
-
-function raycastAlongNormal(pointOnPlane, normal) {
-	const origin = pointOnPlane.clone().add(normal.clone().multiplyScalar(200));
-	const dir = normal.clone().negate();
-	raycaster.set(origin, dir);
-	const intersects = raycaster.intersectObject(modelMesh);
-	return intersects.length > 0 ? intersects[0] : null;
-}
-
-function clampInt(val, min, max) {
-	if (isNaN(val)) return min;
-	return Math.min(max, Math.max(min, val|0));
-}
