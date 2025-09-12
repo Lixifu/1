@@ -54,6 +54,8 @@ const markerDiameterInput = document.getElementById('marker-diameter-input');
 const uloopWidthInput = document.getElementById('uloop-width-input');
 const uloopHeightInput = document.getElementById('uloop-height-input');
 const uloopEndDistanceInput = document.getElementById('uloop-end-distance-input');
+const aiSamplesInput = document.getElementById('ai-samples');
+const aiGenerateBtn = document.getElementById('ai-generate');
 
 // Geometry params (with defaults from design specs)
 let wireRadius = 0.4; // mm (visual tube radius)
@@ -261,6 +263,7 @@ function disableDesignUI(disabled) {
 	clearAllBtn.disabled = disabled;
 	generateUloopBtn.disabled = true;
 	undoBtn.disabled = historyStack.length === 0;
+	aiGenerateBtn.disabled = true;
 }
 
 function updateModeButtons() {
@@ -340,6 +343,7 @@ function redrawScene() {
 	setupPointDragControls();
 	updateExportAvailability();
 	updateUndoBtn();
+	updateAIAvailability();
 }
 
 function addPointMarker(position, index) {
@@ -391,16 +395,10 @@ function updateArchCurve() {
 	if (points.length < 2) return;
 	const mode = designModeSelect.value;
 	let curve;
-	if (mode === 'smooth') {
-		curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.5);
-	} else {
-		const path = new THREE.CurvePath();
-		for (let i = 0; i < points.length - 1; i++) {
-			path.add(new THREE.LineCurve3(points[i], points[i + 1]));
-		}
-		curve = path;
-	}
-	const tubeGeometry = new THREE.TubeGeometry(curve, 256, wireRadius, 12, false);
+	// 无论选择什么模式，都使用CatmullRomCurve3来确保U型曲部分更加平滑
+	curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.5);
+	// 增加TubeGeometry的分段数和径向分段数，使曲线更加平滑和圆润
+	const tubeGeometry = new THREE.TubeGeometry(curve, 512, wireRadius, 16, false);
 	const tubeMaterial = new THREE.MeshStandardMaterial({ color: 0x00bfff, metalness: 0.5, roughness: 0.2, emissive: 0x112233 });
 	archCurveObject = new THREE.Mesh(tubeGeometry, tubeMaterial);
 	scene.add(archCurveObject);
@@ -412,6 +410,12 @@ function setMarkersVisibility(visible) {
 
 function updateExportAvailability() {
 	exportBtn.disabled = points.length === 0;
+}
+
+function updateAIAvailability() {
+	const hasPlane = planeControlPoints.length === 3 || !!referencePlaneMesh;
+	aiGenerateBtn.disabled = !(modelMesh && hasPlane && points.length >= 3);
+	if (!aiSamplesInput.value) aiSamplesInput.value = 200;
 }
 
 function updateUndoBtn() {
@@ -550,20 +554,10 @@ function generateULoopFromSelection() {
 }
 
 function generateULoopGeometry(baseStart, baseEnd, y_hat, height) {
-	// Calculate U-loop width based on distance between endpoints
-	const baseDistance = baseStart.distanceTo(baseEnd);
-	const actualWidth = Math.min(uLoopWidth, baseDistance * 0.8); // Don't exceed 80% of base distance
-	
-	// Calculate arm positions with proper width
-	const x_hat = new THREE.Vector3().subVectors(baseEnd, baseStart).normalize();
-	const widthOffset = x_hat.clone().multiplyScalar(actualWidth / 2);
-	
-	const armStart = baseStart.clone().add(widthOffset);
-	const armEnd = baseEnd.clone().sub(widthOffset);
-	
+	// 不添加额外的宽度偏移，直接使用原始端点作为U型曲的基础
 	// Add height to arms
-	const armTopStart = armStart.clone().add(y_hat.clone().multiplyScalar(height));
-	const armTopEnd = armEnd.clone().add(y_hat.clone().multiplyScalar(height));
+	const armTopStart = baseStart.clone().add(y_hat.clone().multiplyScalar(height));
+	const armTopEnd = baseEnd.clone().add(y_hat.clone().multiplyScalar(height));
 	
 	// Apply end distance offset (move away from tissue surface)
 	const endOffset = y_hat.clone().multiplyScalar(uLoopEndDistance);
@@ -577,10 +571,12 @@ function generateULoopGeometry(baseStart, baseEnd, y_hat, height) {
 	// Generate semicircle between arm tops
 	const semicenter = armTopStart.clone().lerp(armTopEnd, 0.5);
 	const startVec = new THREE.Vector3().subVectors(armTopStart, semicenter);
+	const x_hat = new THREE.Vector3().subVectors(baseEnd, baseStart).normalize();
 	const z_hat = new THREE.Vector3().crossVectors(x_hat, y_hat).normalize();
-	const numSemicirclePoints = 16;
+	const numSemicirclePoints = 16; // 半圆的点数量
 	const midPointIndex = Math.floor(numSemicirclePoints / 2);
 	
+	// 修改角度计算方式，使半圆更加平滑和圆润
 	for (let i = 1; i < numSemicirclePoints; i++) {
 		const angle = -Math.PI * (i / numSemicirclePoints);
 		const point = new THREE.Vector3().copy(startVec).applyAxisAngle(z_hat, angle).add(semicenter);
@@ -713,6 +709,7 @@ function wireEvents() {
 	openSettingsBtn.addEventListener('click', showSettingsModal);
 	cancelSettingsBtn.addEventListener('click', hideSettingsModal);
 	saveSettingsBtn.addEventListener('click', saveSettings);
+	aiGenerateBtn.addEventListener('click', () => aiGeneratePath());
 	// Design UI locked until plane confirmed
 	disableDesignUI(true);
 }
@@ -729,3 +726,78 @@ function restartIfContextLost() {
 
 initScene();
 wireEvents();
+
+// --- AI-assisted path generation (heuristic based on reference plane) ---
+function aiGeneratePath() {
+	if (!modelMesh) { setStatus('请先加载STL模型。'); return; }
+	if (planeControlPoints.length < 3 && !referencePlaneMesh) { setStatus('请先定义并确认参考平面。'); return; }
+	if (points.length < 3) { setStatus('请至少放置3个关键点。'); return; }
+	const sampleCount = clampInt(parseInt(aiSamplesInput.value, 10), 50, 600);
+	const planePoint = (planeControlPoints[0] ? planeControlPoints[0].position : new THREE.Vector3(0,0,0)).clone();
+	const n = planeNormal.clone().normalize();
+	const basis = buildPlaneBasis(n);
+
+	// 1) Project key points to plane and 2D coordinates
+	const key2D = points.map(p => {
+		const proj = projectPointToPlane(p, planePoint, n);
+		return toPlane2D(proj, planePoint, basis.u, basis.v);
+	});
+	// 2) Fit Catmull-Rom in 2D and sample
+	const curve2D = new THREE.CatmullRomCurve3(key2D.map(pt => new THREE.Vector3(pt.x, pt.y, 0)), false, 'catmullrom', 0.5);
+	const newPoints = [];
+	for (let i = 0; i < sampleCount; i++) {
+		const t = i / (sampleCount - 1);
+		const p2 = curve2D.getPoint(t);
+		const p3 = fromPlane2D({ x: p2.x, y: p2.y }, planePoint, basis.u, basis.v);
+		// 3) Cast along plane normal to find surface, then offset by wire radius
+		const hit = raycastAlongNormal(p3, n);
+		if (hit) {
+			const offset = getOffsetPoint(hit);
+			newPoints.push(offset);
+		} else {
+			// fallback to plane point (with outward offset) if no hit
+			newPoints.push(p3.clone().add(n.clone().multiplyScalar(wireRadius)));
+		}
+	}
+	// apply
+	saveState();
+	points = newPoints;
+	redrawScene();
+	setStatus(`AI生成完成（${sampleCount} 点）。`);
+}
+
+function projectPointToPlane(p, planePoint, normal) {
+	const v = new THREE.Vector3().subVectors(p, planePoint);
+	const dist = v.dot(normal);
+	return p.clone().sub(normal.clone().multiplyScalar(dist));
+}
+
+function buildPlaneBasis(normal) {
+	// choose arbitrary vector not parallel to normal
+	const arbitrary = Math.abs(normal.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+	const u = new THREE.Vector3().crossVectors(normal, arbitrary).normalize();
+	const v = new THREE.Vector3().crossVectors(normal, u).normalize();
+	return { u, v };
+}
+
+function toPlane2D(p, planePoint, u, v) {
+	const rel = new THREE.Vector3().subVectors(p, planePoint);
+	return { x: rel.dot(u), y: rel.dot(v) };
+}
+
+function fromPlane2D(pt, planePoint, u, v) {
+	return planePoint.clone().add(u.clone().multiplyScalar(pt.x)).add(v.clone().multiplyScalar(pt.y));
+}
+
+function raycastAlongNormal(pointOnPlane, normal) {
+	const origin = pointOnPlane.clone().add(normal.clone().multiplyScalar(200));
+	const dir = normal.clone().negate();
+	raycaster.set(origin, dir);
+	const intersects = raycaster.intersectObject(modelMesh);
+	return intersects.length > 0 ? intersects[0] : null;
+}
+
+function clampInt(val, min, max) {
+	if (isNaN(val)) return min;
+	return Math.min(max, Math.max(min, val|0));
+}
