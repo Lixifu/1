@@ -23,6 +23,7 @@ let isEditMode = false;
 
 // Selection for U-loop
 const SELECTION_COLOR_ULOOP = 0x9932CC;
+const SELECTION_COLOR_ULOOP_MIDDLE = 0xFFA500; // 橙色用于中间点
 let uLoopSelectionIndices = [];
 
 // Undo history
@@ -504,15 +505,28 @@ function handleULoopSelection(marker) {
 		uLoopSelectionIndices.splice(selectionIndex, 1);
 		marker.material.color.set(0xff0000);
 	} else {
-		if (uLoopSelectionIndices.length >= 2) {
+		if (uLoopSelectionIndices.length >= 3) {
+			// 如果已经选了三个点，先清除最早的点
 			const oldIndex = uLoopSelectionIndices.shift();
 			const oldMarker = draggableObjects.find(m => m.userData.index === oldIndex);
 			if (oldMarker) oldMarker.material.color.set(0xff0000);
 		}
 		uLoopSelectionIndices.push(index);
-		marker.material.color.set(SELECTION_COLOR_ULOOP);
+		// 为不同位置的点设置不同颜色
+		if (uLoopSelectionIndices.length === 3) {
+			// 第一个点（起点）和最后一个点（终点）用紫色，中间点用橙色
+			draggableObjects.forEach(m => {
+				if (m.userData.index === uLoopSelectionIndices[0] || m.userData.index === uLoopSelectionIndices[2]) {
+					m.material.color.set(SELECTION_COLOR_ULOOP);
+				} else if (m.userData.index === uLoopSelectionIndices[1]) {
+					m.material.color.set(SELECTION_COLOR_ULOOP_MIDDLE);
+				}
+			});
+		} else {
+			marker.material.color.set(SELECTION_COLOR_ULOOP);
+		}
 	}
-	generateUloopBtn.disabled = uLoopSelectionIndices.length !== 2;
+	generateUloopBtn.disabled = uLoopSelectionIndices.length !== 3;
 }
 
 function deselectAllPoints() {
@@ -525,30 +539,22 @@ function deselectAllPoints() {
 }
 
 function generateULoopFromSelection() {
-	if (uLoopSelectionIndices.length !== 2) return;
+	if (uLoopSelectionIndices.length !== 3) return;
 	saveState();
-	const [index1, index2] = uLoopSelectionIndices.slice().sort((a, b) => a - b);
+	// 保持三个点的顺序不变（起点、中间点、终点）
+	const [index1, index2, index3] = uLoopSelectionIndices;
 	const p_start = points[index1];
-	const p_end = points[index2];
-	const hasMiddle = (index2 - index1 > 1);
-	const p_mid_ref = hasMiddle ? points[Math.floor((index1 + index2) / 2)] : null;
+	const p_mid = points[index2]; // 这是U型曲的最低点
+	const p_end = points[index3];
 
-	const x_hat = new THREE.Vector3().subVectors(p_end, p_start).normalize();
-	let y_hat;
-	if (p_mid_ref) {
-		const v1m = new THREE.Vector3().subVectors(p_mid_ref, p_start);
-		const v_perp = v1m.clone().sub(x_hat.clone().multiplyScalar(v1m.dot(x_hat)));
-		y_hat = (v_perp.lengthSq() < 1e-6) ? new THREE.Vector3().crossVectors(x_hat, planeNormal).normalize() : v_perp.normalize();
-		const curveMidpoint = p_start.clone().lerp(p_end, 0.5);
-		const outVector = new THREE.Vector3().subVectors(p_mid_ref, curveMidpoint);
-		if (y_hat.dot(outVector) < 0) y_hat.negate();
-	} else {
-		y_hat = new THREE.Vector3().crossVectors(x_hat, planeNormal).normalize();
-	}
-
-	const newPoints = generateULoopGeometry(p_start, p_end, y_hat, uLoopHeight);
-	const pointsToRemove = index2 - index1 - 1;
-	points.splice(index1 + 1, pointsToRemove, ...newPoints);
+	// 根据三个点计算平面
+	const newPoints = generateULoopFromThreePoints(p_start, p_mid, p_end);
+	
+	// 确定要替换的点范围
+	const minIndex = Math.min(index1, index2, index3);
+	const maxIndex = Math.max(index1, index2, index3);
+	const pointsToRemove = maxIndex - minIndex - 1;
+	points.splice(minIndex + 1, pointsToRemove, ...newPoints);
 	deselectAllPoints();
 	redrawScene();
 }
@@ -591,6 +597,34 @@ function generateULoopGeometry(baseStart, baseEnd, y_hat, height) {
 	armTopEnd.userData = { type: 'uloop' };
 	loopPoints.push(armTopEnd);
 	return loopPoints;
+}
+
+// 新函数：从三个点生成U型曲
+function generateULoopFromThreePoints(p_start, p_mid, p_end) {
+	// 计算三个点所在平面的法线
+	const v1 = new THREE.Vector3().subVectors(p_mid, p_start);
+	const v2 = new THREE.Vector3().subVectors(p_end, p_start);
+	const planeNormal = new THREE.Vector3().crossVectors(v1, v2).normalize();
+	
+	// 计算起点到终点的方向向量
+	const x_hat = new THREE.Vector3().subVectors(p_end, p_start).normalize();
+	// 计算在平面内垂直于x_hat的向量
+	const y_hat = new THREE.Vector3().crossVectors(planeNormal, x_hat).normalize();
+	
+	// 确保y_hat指向正确的方向（朝向最低点）
+	const curveMidpoint = p_start.clone().lerp(p_end, 0.5);
+	const toMidPoint = new THREE.Vector3().subVectors(p_mid, curveMidpoint);
+	if (y_hat.dot(toMidPoint) < 0) {
+		y_hat.negate();
+	}
+	
+	// 计算U型曲的高度（从起点-终点连线到最低点的距离）
+	const height = toMidPoint.length();
+	
+	// 使用修改后的generateULoopGeometry生成U型曲
+	const newPoints = generateULoopGeometry(p_start, p_end, y_hat, height);
+	
+	return newPoints;
 }
 
 // Undo stack
