@@ -268,7 +268,7 @@ function updateModeButtons() {
 		toggleDrawBtn.textContent = '开始绘制';
 	}
 	if (isEditMode) {
-		setStatus('编辑模式：拖动点修改路径。按住Shift单击选择两个端点。');
+		setStatus('编辑模式：拖动点修改路径。按住Shift单击选择三个端点。');
 	}
 	if (!isDrawingMode && !isEditMode && !isPlaneMode) {
 		setStatus('请选择操作模式。');
