@@ -314,7 +314,25 @@ function addPointAtCursor() {
 	if (intersects.length === 0) return;
 	saveState();
 	const offsetPoint = getOffsetPoint(intersects[0]);
-	points.push(offsetPoint);
+	
+	// 如果points数组为空，直接添加
+	if (points.length === 0) {
+		points.push(offsetPoint);
+	} else {
+		// 计算新点到路径两端点的距离
+		const distanceToStart = offsetPoint.distanceTo(points[0]);
+		const distanceToEnd = offsetPoint.distanceTo(points[points.length - 1]);
+		
+		// 根据距离决定插入位置
+		if (distanceToStart <= distanceToEnd) {
+			// 距离起点更近，插入到开头
+			points.unshift(offsetPoint);
+		} else {
+			// 距离终点更近，插入到末尾
+			points.push(offsetPoint);
+		}
+	}
+	
 	redrawScene();
 }
 
