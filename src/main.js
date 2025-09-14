@@ -60,11 +60,15 @@ const cancelSettingsBtn = document.getElementById('cancel-settings');
 const saveSettingsBtn = document.getElementById('save-settings');
 const wireDiameterInput = document.getElementById('wire-diameter-input');
 const markerDiameterInput = document.getElementById('marker-diameter-input');
+const controlPointsInput = document.getElementById('control-points-input');
+const smoothPointsInput = document.getElementById('smooth-points-input');
 // Removed U-loop parameters
 
 // Geometry params (with defaults from design specs)
 let wireRadius = 0.4; // mm (visual tube radius)
 let markerRadius = 0.4; // mm (marker sphere radius)
+let controlPointsCount = 10; // 控制点数量
+let smoothPointsCount = 50; // 平滑曲线点数
 
 // Parameter storage key
 const PARAMS_STORAGE_KEY = 'dental_designer_params';
@@ -642,7 +646,35 @@ function updateUndoBtn() {
 
 function exportJSON() {
 	if (points.length === 0) return;
-	const data = { points: points.map(p => ({ x: p.x, y: p.y, z: p.z })) };
+	
+	// 构建导出数据，包含路径点和参考平面信息
+	const data = { 
+		points: points.map(p => ({ x: p.x, y: p.y, z: p.z })),
+		referencePlane: null
+	};
+	
+	// 如果有参考平面，添加参考平面数据
+	if (referencePlaneMesh && planeControlPoints.length === 3) {
+		data.referencePlane = {
+			controlPoints: planeControlPoints.map(p => ({ 
+				x: p.position.x, 
+				y: p.position.y, 
+				z: p.position.z 
+			})),
+			normal: {
+				x: planeNormal.x,
+				y: planeNormal.y,
+				z: planeNormal.z
+			},
+			position: {
+				x: referencePlaneMesh.position.x,
+				y: referencePlaneMesh.position.y,
+				z: referencePlaneMesh.position.z
+			},
+			visible: referencePlaneMesh.visible
+		};
+	}
+	
 	const a = document.createElement('a');
 	a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
 	a.download = 'design.json';
@@ -659,7 +691,45 @@ function importJSONFile(file) {
 			if (Array.isArray(json.points)) {
 				saveStateIfPoints();
 				points = json.points.map(p => new THREE.Vector3(p.x, p.y, p.z));
-				setStatus('设计导入成功');
+				
+				// 导入参考平面数据
+				if (json.referencePlane && Array.isArray(json.referencePlane.controlPoints) && json.referencePlane.controlPoints.length === 3) {
+					// 清除现有参考平面
+					resetPlane();
+					
+					// 恢复控制点
+					json.referencePlane.controlPoints.forEach(pointData => {
+						const position = new THREE.Vector3(pointData.x, pointData.y, pointData.z);
+						addPlaneControlPoint(position);
+					});
+					
+					// 恢复平面法线
+					if (json.referencePlane.normal) {
+						planeNormal.set(json.referencePlane.normal.x, json.referencePlane.normal.y, json.referencePlane.normal.z);
+					}
+					
+					// 确认平面状态（这会创建referencePlaneMesh）
+					confirmPlane();
+					
+					// 恢复平面位置和可见性
+					if (referencePlaneMesh && json.referencePlane.position) {
+						referencePlaneMesh.position.set(
+							json.referencePlane.position.x, 
+							json.referencePlane.position.y, 
+							json.referencePlane.position.z
+						);
+					}
+					
+					if (referencePlaneMesh && typeof json.referencePlane.visible === 'boolean') {
+						referencePlaneMesh.visible = json.referencePlane.visible;
+						togglePlaneVisibilityBtn.textContent = referencePlaneMesh.visible ? '隐藏平面' : '显示平面';
+					}
+					
+					setStatus('设计和参考平面导入成功');
+				} else {
+					setStatus('设计导入成功');
+				}
+				
 				redrawScene();
 			} else {
 				setStatus('导入失败：JSON格式不正确');
@@ -768,8 +838,8 @@ function generatePathFromContactPoints() {
 		return;
 	}
 	
-	// 限制路径点数量在10个左右
-	const limitedPoints = limitPathPoints(pathPoints, 10);
+	// 限制路径点数量为控制点数量
+	const limitedPoints = limitPathPoints(pathPoints, controlPointsCount);
 	
 	// 使用平滑曲线算法生成更多点
 	const smoothPoints = generateSmoothCurve(limitedPoints);
@@ -889,9 +959,8 @@ function generateSmoothCurve(controlPoints) {
 	// 使用CatmullRom曲线生成平滑路径
 	const curve = new THREE.CatmullRomCurve3(controlPoints, false, 'catmullrom', 0.5);
 	
-	// 生成更多的点来创建平滑曲线
-	const numPoints = Math.max(50, controlPoints.length * 5); // 至少50个点
-	const smoothPoints = curve.getPoints(numPoints);
+	// 使用用户设置的点数来创建平滑曲线
+	const smoothPoints = curve.getPoints(smoothPointsCount);
 	
 	return smoothPoints;
 }
@@ -1066,6 +1135,8 @@ function loadParameters() {
 			const params = JSON.parse(saved);
 			wireRadius = params.wireRadius || 0.4;
 			markerRadius = params.markerRadius || 0.4;
+			controlPointsCount = params.controlPointsCount || 10;
+			smoothPointsCount = params.smoothPointsCount || 50;
 		}
 	} catch (err) {
 		console.warn('Failed to load parameters:', err);
@@ -1076,7 +1147,9 @@ function saveParameters() {
 	try {
 		const params = {
 			wireRadius,
-			markerRadius
+			markerRadius,
+			controlPointsCount,
+			smoothPointsCount
 		};
 		localStorage.setItem(PARAMS_STORAGE_KEY, JSON.stringify(params));
 	} catch (err) {
@@ -1087,6 +1160,8 @@ function saveParameters() {
 function showSettingsModal() {
 	wireDiameterInput.value = (wireRadius * 2).toFixed(1);
 	markerDiameterInput.value = (markerRadius * 2).toFixed(1);
+	controlPointsInput.value = controlPointsCount;
+	smoothPointsInput.value = smoothPointsCount;
 	settingsModal.classList.remove('hidden');
 }
 
@@ -1097,9 +1172,13 @@ function hideSettingsModal() {
 function saveSettings() {
 	const newWireDiameter = parseFloat(wireDiameterInput.value);
 	const newMarkerDiameter = parseFloat(markerDiameterInput.value);
+	const newControlPoints = parseInt(controlPointsInput.value);
+	const newSmoothPoints = parseInt(smoothPointsInput.value);
 
 	if (!isNaN(newWireDiameter) && newWireDiameter > 0) wireRadius = newWireDiameter / 2;
 	if (!isNaN(newMarkerDiameter) && newMarkerDiameter > 0) markerRadius = newMarkerDiameter / 2;
+	if (!isNaN(newControlPoints) && newControlPoints >= 3 && newControlPoints <= 20) controlPointsCount = newControlPoints;
+	if (!isNaN(newSmoothPoints) && newSmoothPoints >= 20 && newSmoothPoints <= 200) smoothPointsCount = newSmoothPoints;
 
 	saveParameters();
 	redrawScene();
