@@ -20,11 +20,19 @@ let planeDragControls = null;
 let isPlaneMode = false;
 let isDrawingMode = false;
 let isEditMode = false;
+let isContactPointsMode = false;
 
 // Selection for U-loop
 const SELECTION_COLOR_ULOOP = 0x9932CC;
 const SELECTION_COLOR_ULOOP_MIDDLE = 0xFFA500; // 橙色用于中间点
 let uLoopSelectionIndices = [];
+
+// Contact points mode
+let contactPoints = [];
+let contactPointMarkers = [];
+let selectedContactPoints = [];
+const CONTACT_POINT_COLOR = 0x00FF00; // 绿色
+const SELECTED_CONTACT_POINT_COLOR = 0xFF6600; // 橙色
 
 // Undo history
 let historyStack = [];
@@ -236,6 +244,173 @@ function updateReferencePlane() {
 	referencePlaneMesh.lookAt(p1.clone().add(plane.normal));
 }
 
+// 计算参考平面与模型的接触点
+function calculateContactPoints() {
+	if (!modelMesh || !referencePlaneMesh) return;
+	
+	// 清除现有的接触点
+	clearContactPoints();
+	
+	const geometry = modelMesh.geometry;
+	const positionAttribute = geometry.getAttribute('position');
+	const positions = positionAttribute.array;
+	const indices = geometry.index ? geometry.index.array : null;
+	
+	// 获取参考平面的参数
+	const planePosition = referencePlaneMesh.position;
+	const planeNormal = new THREE.Vector3();
+	referencePlaneMesh.getWorldDirection(planeNormal);
+	planeNormal.negate(); // 获取正确的法线方向
+	
+	// 创建平面对象用于距离计算
+	const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, planePosition);
+	
+	// 存储候选接触点
+	const candidatePoints = [];
+	const tolerance = 0.5; // 容差，单位：mm
+	
+	// 遍历所有顶点
+	for (let i = 0; i < positions.length; i += 3) {
+		const vertex = new THREE.Vector3(positions[i], positions[i + 1], positions[i + 2]);
+		
+		// 将顶点转换到世界坐标
+		vertex.applyMatrix4(modelMesh.matrixWorld);
+		
+		// 计算顶点到平面的距离
+		const distance = Math.abs(plane.distanceToPoint(vertex));
+		
+		// 如果距离在容差范围内，认为是接触点
+		if (distance <= tolerance) {
+			candidatePoints.push(vertex.clone());
+		}
+	}
+	
+	// 对候选点进行聚类，避免重复点
+	const clusteredPoints = clusterPoints(candidatePoints, 1.0); // 1mm聚类半径
+	
+	// 对接触点进行排序，按照在参考平面与模型交线上的实际位置排序
+	const sortedPoints = sortContactPointsByIntersectionCurve(clusteredPoints, planePosition, planeNormal);
+	
+	// 创建接触点标记
+	sortedPoints.forEach(point => {
+		createContactPointMarker(point);
+		contactPoints.push(point);
+	});
+	
+	setStatus(`找到 ${contactPoints.length} 个接触点`);
+}
+
+// 按照角度对接触点进行排序
+function sortContactPointsByAngle(points, planePosition, planeNormal) {
+	// 创建平面内的两个正交向量
+	const up = new THREE.Vector3(0, 1, 0);
+	const right = new THREE.Vector3().crossVectors(planeNormal, up).normalize();
+	const forward = new THREE.Vector3().crossVectors(right, planeNormal).normalize();
+	
+	// 计算每个点相对于平面中心的角度
+	return points.sort((a, b) => {
+		const aVec = new THREE.Vector3().subVectors(a, planePosition);
+		const bVec = new THREE.Vector3().subVectors(b, planePosition);
+		
+		// 投影到平面内
+		const aProj = new THREE.Vector3().addVectors(
+			aVec.clone().projectOnVector(right).multiplyScalar(right.dot(aVec)),
+			aVec.clone().projectOnVector(forward).multiplyScalar(forward.dot(aVec))
+		);
+		const bProj = new THREE.Vector3().addVectors(
+			bVec.clone().projectOnVector(right).multiplyScalar(right.dot(bVec)),
+			bVec.clone().projectOnVector(forward).multiplyScalar(forward.dot(bVec))
+		);
+		
+		// 计算角度
+		const aAngle = Math.atan2(aProj.dot(forward), aProj.dot(right));
+		const bAngle = Math.atan2(bProj.dot(forward), bProj.dot(right));
+		
+		return aAngle - bAngle;
+	});
+}
+
+// 按照在参考平面与模型交线上的实际位置对接触点进行排序
+function sortContactPointsByIntersectionCurve(points, planePosition, planeNormal) {
+	// 找到参考平面与模型的交线中心点
+	const centerPoint = findIntersectionCurveCenter(points, planePosition, planeNormal);
+	
+	// 按照距离中心点的角度排序
+	return points.sort((a, b) => {
+		const aVec = new THREE.Vector3().subVectors(a, centerPoint);
+		const bVec = new THREE.Vector3().subVectors(b, centerPoint);
+		
+		// 计算角度
+		const aAngle = Math.atan2(aVec.z, aVec.x);
+		const bAngle = Math.atan2(bVec.z, bVec.x);
+		
+		return aAngle - bAngle;
+	});
+}
+
+// 找到参考平面与模型交线的中心点
+function findIntersectionCurveCenter(points, planePosition, planeNormal) {
+	if (points.length === 0) return planePosition;
+	
+	// 计算所有点的质心
+	const center = new THREE.Vector3();
+	points.forEach(point => center.add(point));
+	center.divideScalar(points.length);
+	
+	return center;
+}
+
+// 点聚类函数
+function clusterPoints(points, radius) {
+	const clusters = [];
+	const used = new Set();
+	
+	for (let i = 0; i < points.length; i++) {
+		if (used.has(i)) continue;
+		
+		const cluster = [points[i]];
+		used.add(i);
+		
+		// 找到所有在半径内的点
+		for (let j = i + 1; j < points.length; j++) {
+			if (used.has(j)) continue;
+			
+			if (points[i].distanceTo(points[j]) <= radius) {
+				cluster.push(points[j]);
+				used.add(j);
+			}
+		}
+		
+		// 计算聚类中心
+		const center = new THREE.Vector3();
+		cluster.forEach(point => center.add(point));
+		center.divideScalar(cluster.length);
+		
+		clusters.push(center);
+	}
+	
+	return clusters;
+}
+
+// 创建接触点标记
+function createContactPointMarker(position) {
+	const geometry = new THREE.SphereGeometry(0.3, 16, 16);
+	const material = new THREE.MeshBasicMaterial({ color: CONTACT_POINT_COLOR });
+	const marker = new THREE.Mesh(geometry, material);
+	marker.position.copy(position);
+	marker.userData = { type: 'contactPoint', index: contactPoints.length };
+	scene.add(marker);
+	contactPointMarkers.push(marker);
+}
+
+// 清除接触点
+function clearContactPoints() {
+	contactPointMarkers.forEach(marker => scene.remove(marker));
+	contactPointMarkers = [];
+	contactPoints = [];
+	selectedContactPoints = [];
+}
+
 function resetPlane() {
 	planeControlPoints.forEach(p => scene.remove(p));
 	planeControlPoints = [];
@@ -270,7 +445,10 @@ function updateModeButtons() {
 	if (isEditMode) {
 		setStatus('编辑模式：拖动点修改路径。按住Shift单击选择三个端点。');
 	}
-	if (!isDrawingMode && !isEditMode && !isPlaneMode) {
+	if (isContactPointsMode) {
+		setStatus('接触点模式：单击接触点选择起点和终点。');
+	}
+	if (!isDrawingMode && !isEditMode && !isPlaneMode && !isContactPointsMode) {
 		setStatus('请选择操作模式。');
 	}
 }
@@ -285,6 +463,20 @@ function toggleDrawMode() {
 function toggleEditMode() {
 	isEditMode = !isEditMode;
 	if (isEditMode) isDrawingMode = false;
+	updateModeButtons();
+}
+
+function toggleContactPointsMode() {
+	isContactPointsMode = !isContactPointsMode;
+	if (isContactPointsMode) {
+		isDrawingMode = false;
+		isEditMode = false;
+		// 计算并显示接触点
+		calculateContactPoints();
+	} else {
+		// 清除接触点
+		clearContactPoints();
+	}
 	updateModeButtons();
 }
 
@@ -304,6 +496,8 @@ function clearDrawing() {
 		archCurveObject.material?.dispose?.();
 		archCurveObject = null;
 	}
+	// 清除接触点
+	clearContactPoints();
 	updateExportAvailability();
 }
 
@@ -500,7 +694,161 @@ function onCanvasMouseUp(event) {
 	if (isDrawingMode) {
 		addPointAtCursor();
 	}
+	if (isContactPointsMode) {
+		handleContactPointSelection();
+	}
 }
+
+// Contact point selection and path generation
+function handleContactPointSelection() {
+	raycaster.setFromCamera(mouse, camera);
+	const intersects = raycaster.intersectObjects(contactPointMarkers);
+	if (intersects.length === 0) return;
+	
+	const marker = intersects[0].object;
+	const index = marker.userData.index;
+	
+	// 如果已经选择了这个点，取消选择
+	if (selectedContactPoints.includes(index)) {
+		selectedContactPoints = selectedContactPoints.filter(i => i !== index);
+		marker.material.color.set(CONTACT_POINT_COLOR);
+		setStatus(`已取消选择接触点 ${index + 1}，当前选择：${selectedContactPoints.length}/2`);
+		return;
+	}
+	
+	// 如果已经选择了两个点，先清除选择
+	if (selectedContactPoints.length >= 2) {
+		selectedContactPoints.forEach(i => {
+			contactPointMarkers[i].material.color.set(CONTACT_POINT_COLOR);
+		});
+		selectedContactPoints = [];
+	}
+	
+	// 选择新点
+	selectedContactPoints.push(index);
+	marker.material.color.set(SELECTED_CONTACT_POINT_COLOR);
+	
+	setStatus(`已选择接触点 ${index + 1}，当前选择：${selectedContactPoints.length}/2`);
+	
+	// 如果选择了两个点，生成路径
+	if (selectedContactPoints.length === 2) {
+		generatePathFromContactPoints();
+	}
+}
+
+function generatePathFromContactPoints() {
+	if (selectedContactPoints.length !== 2) return;
+	
+	const startIndex = selectedContactPoints[0];
+	const endIndex = selectedContactPoints[1];
+	
+	// 直接使用接触点，选择两点之间的短曲线
+	const pathPoints = getCurvePointsBetweenIndices(contactPoints, startIndex, endIndex);
+	
+	if (pathPoints.length < 2) {
+		setStatus('无法生成路径：未找到有效的接触点');
+		return;
+	}
+	
+	// 限制路径点数量在10个左右
+	const limitedPoints = limitPathPoints(pathPoints, 10);
+	
+	// 清除现有路径并设置新路径
+	saveState();
+	points = limitedPoints;
+	redrawScene();
+	
+	setStatus(`已生成包含 ${limitedPoints.length} 个点的平滑路径`);
+}
+
+
+function getCurvePointsBetweenIndices(contactPoints, startIndex, endIndex) {
+	const n = contactPoints.length;
+	
+	// 计算两个方向的距离
+	const forwardDistance = (endIndex - startIndex + n) % n;
+	const backwardDistance = (startIndex - endIndex + n) % n;
+	
+	// 选择较短的方向
+	let selectedIndices;
+	if (forwardDistance <= backwardDistance) {
+		// 正向路径较短
+		selectedIndices = [];
+		for (let i = 0; i <= forwardDistance; i++) {
+			selectedIndices.push((startIndex + i) % n);
+		}
+	} else {
+		// 反向路径较短
+		selectedIndices = [];
+		for (let i = 0; i <= backwardDistance; i++) {
+			selectedIndices.push((startIndex - i + n) % n);
+		}
+	}
+	
+	// 从选中的索引中提取点
+	const selectedPoints = selectedIndices.map(index => contactPoints[index]);
+	
+	// 确保路径点按照在交线上的实际位置排序
+	return sortPointsAlongCurve(selectedPoints);
+}
+
+// 沿着曲线对点进行排序
+function sortPointsAlongCurve(points) {
+	if (points.length <= 2) return points;
+	
+	// 计算曲线的总长度
+	let totalLength = 0;
+	for (let i = 1; i < points.length; i++) {
+		totalLength += points[i-1].distanceTo(points[i]);
+	}
+	
+	// 如果曲线太短，直接返回
+	if (totalLength < 0.1) return points;
+	
+	// 按照累积距离排序
+	const sortedPoints = [points[0]]; // 起点
+	const remainingPoints = points.slice(1);
+	
+	while (remainingPoints.length > 0) {
+		const lastPoint = sortedPoints[sortedPoints.length - 1];
+		let closestIndex = 0;
+		let minDistance = lastPoint.distanceTo(remainingPoints[0]);
+		
+		// 找到距离上一个点最近的点
+		for (let i = 1; i < remainingPoints.length; i++) {
+			const distance = lastPoint.distanceTo(remainingPoints[i]);
+			if (distance < minDistance) {
+				minDistance = distance;
+				closestIndex = i;
+			}
+		}
+		
+		// 添加最近的点
+		sortedPoints.push(remainingPoints[closestIndex]);
+		remainingPoints.splice(closestIndex, 1);
+	}
+	
+	return sortedPoints;
+}
+
+// 限制路径点数量
+function limitPathPoints(points, maxPoints) {
+	if (points.length <= maxPoints) {
+		return points;
+	}
+	
+	// 均匀选择指定数量的点
+	const step = (points.length - 1) / (maxPoints - 1);
+	const resultPoints = [];
+	
+	for (let i = 0; i < maxPoints; i++) {
+		const index = Math.round(i * step);
+		resultPoints.push(points[index].clone());
+	}
+	
+	return resultPoints;
+}
+
 
 // U-loop selection and generation
 function handleULoopSelection(marker) {
@@ -725,7 +1073,17 @@ function wireEvents() {
 	enterPlaneBtn.addEventListener('click', () => enterPlaneMode());
 	confirmPlaneBtn.addEventListener('click', () => confirmPlane());
 	togglePlaneVisibilityBtn.addEventListener('click', () => togglePlaneVisibility());
-	designModeSelect.addEventListener('change', () => updateArchCurve());
+	designModeSelect.addEventListener('change', () => {
+		const mode = designModeSelect.value;
+		if (mode === 'contact-points') {
+			toggleContactPointsMode();
+		} else {
+			if (isContactPointsMode) {
+				toggleContactPointsMode(); // 退出接触点模式
+			}
+			updateArchCurve();
+		}
+	});
 	toggleDrawBtn.addEventListener('click', () => toggleDrawMode());
 	toggleEditBtn.addEventListener('click', () => toggleEditMode());
 	clearAllBtn.addEventListener('click', () => { saveStateIfPoints(); clearDrawing(); });
