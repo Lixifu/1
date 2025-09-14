@@ -288,8 +288,8 @@ function calculateContactPoints() {
 	// 对候选点进行聚类，避免重复点
 	const clusteredPoints = clusterPoints(candidatePoints, 1.0); // 1mm聚类半径
 	
-	// 对接触点进行排序，按照在参考平面与模型交线上的实际位置排序
-	const sortedPoints = sortContactPointsByIntersectionCurve(clusteredPoints, planePosition, planeNormal);
+	// 对接触点进行排序，使用TSP最短路径算法
+	const sortedPoints = sortContactPointsByTSP(clusteredPoints);
 	
 	// 创建接触点标记
 	sortedPoints.forEach(point => {
@@ -330,22 +330,40 @@ function sortContactPointsByAngle(points, planePosition, planeNormal) {
 	});
 }
 
-// 按照在参考平面与模型交线上的实际位置对接触点进行排序
-function sortContactPointsByIntersectionCurve(points, planePosition, planeNormal) {
-	// 找到参考平面与模型的交线中心点
-	const centerPoint = findIntersectionCurveCenter(points, planePosition, planeNormal);
+// 使用TSP最短路径算法对接触点进行排序
+function sortContactPointsByTSP(points) {
+	if (points.length <= 2) return points;
 	
-	// 按照距离中心点的角度排序
-	return points.sort((a, b) => {
-		const aVec = new THREE.Vector3().subVectors(a, centerPoint);
-		const bVec = new THREE.Vector3().subVectors(b, centerPoint);
+	// 使用贪心算法实现TSP
+	const sortedPoints = [];
+	const remainingPoints = [...points];
+	
+	// 选择第一个点作为起始点
+	let currentPoint = remainingPoints[0];
+	sortedPoints.push(currentPoint);
+	remainingPoints.splice(0, 1);
+	
+	// 贪心选择最近的点
+	while (remainingPoints.length > 0) {
+		let closestIndex = 0;
+		let minDistance = currentPoint.distanceTo(remainingPoints[0]);
 		
-		// 计算角度
-		const aAngle = Math.atan2(aVec.z, aVec.x);
-		const bAngle = Math.atan2(bVec.z, bVec.x);
+		// 找到距离当前点最近的点
+		for (let i = 1; i < remainingPoints.length; i++) {
+			const distance = currentPoint.distanceTo(remainingPoints[i]);
+			if (distance < minDistance) {
+				minDistance = distance;
+				closestIndex = i;
+			}
+		}
 		
-		return aAngle - bAngle;
-	});
+		// 添加最近的点
+		currentPoint = remainingPoints[closestIndex];
+		sortedPoints.push(currentPoint);
+		remainingPoints.splice(closestIndex, 1);
+	}
+	
+	return sortedPoints;
 }
 
 // 找到参考平面与模型交线的中心点
@@ -753,12 +771,15 @@ function generatePathFromContactPoints() {
 	// 限制路径点数量在10个左右
 	const limitedPoints = limitPathPoints(pathPoints, 10);
 	
+	// 使用平滑曲线算法生成更多点
+	const smoothPoints = generateSmoothCurve(limitedPoints);
+	
 	// 清除现有路径并设置新路径
 	saveState();
-	points = limitedPoints;
+	points = smoothPoints;
 	redrawScene();
 	
-	setStatus(`已生成包含 ${limitedPoints.length} 个点的平滑路径`);
+	setStatus(`已生成包含 ${smoothPoints.length} 个点的平滑路径`);
 }
 
 
@@ -788,8 +809,20 @@ function getCurvePointsBetweenIndices(contactPoints, startIndex, endIndex) {
 	// 从选中的索引中提取点
 	const selectedPoints = selectedIndices.map(index => contactPoints[index]);
 	
-	// 确保路径点按照在交线上的实际位置排序
-	return sortPointsAlongCurve(selectedPoints);
+	// 确保起点和终点都包含在路径中
+	const resultPoints = [];
+	resultPoints.push(contactPoints[startIndex]); // 确保起点
+	
+	// 添加中间点（如果起点和终点不是相邻的）
+	if (selectedPoints.length > 2) {
+		for (let i = 1; i < selectedPoints.length - 1; i++) {
+			resultPoints.push(selectedPoints[i]);
+		}
+	}
+	
+	resultPoints.push(contactPoints[endIndex]); // 确保终点
+	
+	return resultPoints;
 }
 
 // 沿着曲线对点进行排序
@@ -847,6 +880,20 @@ function limitPathPoints(points, maxPoints) {
 	}
 	
 	return resultPoints;
+}
+
+// 生成平滑曲线
+function generateSmoothCurve(controlPoints) {
+	if (controlPoints.length < 2) return controlPoints;
+	
+	// 使用CatmullRom曲线生成平滑路径
+	const curve = new THREE.CatmullRomCurve3(controlPoints, false, 'catmullrom', 0.5);
+	
+	// 生成更多的点来创建平滑曲线
+	const numPoints = Math.max(50, controlPoints.length * 5); // 至少50个点
+	const smoothPoints = curve.getPoints(numPoints);
+	
+	return smoothPoints;
 }
 
 
