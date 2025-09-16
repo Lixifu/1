@@ -21,6 +21,8 @@ let isPlaneMode = false;
 let isDrawingMode = false;
 let isEditMode = false;
 let isContactPointsMode = false;
+let isHyperbolaMode = false; // 已废弃，不再从UI进入
+let isParabolaMode = false;
 
 // Selection for U-loop
 const SELECTION_COLOR_ULOOP = 0x9932CC;
@@ -33,6 +35,17 @@ let contactPointMarkers = [];
 let selectedContactPoints = [];
 const CONTACT_POINT_COLOR = 0x00FF00; // 绿色
 const SELECTED_CONTACT_POINT_COLOR = 0xFF6600; // 橙色
+
+// Hyperbola mode state (kept for backward compatibility, not used by UI)
+let hyperbolaSelectedContactPoints = [];
+let hyperbolaShortCurvePoints = [];
+let hyperbolaGuideLine = null;
+const HYPERBOLA_SAMPLE_COLOR = 0x00BFFF; // 已不再使用手动采样标记，保留颜色常量
+
+// Parabola mode state
+let parabolaPickedPoints = [];
+let parabolaMarkers = [];
+const PARABOLA_MARKER_COLOR = 0x00BFFF;
 
 // Undo history
 let historyStack = [];
@@ -470,7 +483,10 @@ function updateModeButtons() {
 	if (isContactPointsMode) {
 		setStatus('接触点模式：单击接触点选择起点和终点。');
 	}
-	if (!isDrawingMode && !isEditMode && !isPlaneMode && !isContactPointsMode) {
+	if (isParabolaMode) {
+		setStatus('抛物线模式：在牙模上点击选择3个点进行拟合。');
+	}
+	if (!isDrawingMode && !isEditMode && !isPlaneMode && !isContactPointsMode && !isHyperbolaMode) {
 		setStatus('请选择操作模式。');
 	}
 }
@@ -502,6 +518,39 @@ function toggleContactPointsMode() {
 	updateModeButtons();
 }
 
+function enterHyperbolaMode() {
+	isHyperbolaMode = true;
+	isDrawingMode = false;
+	isEditMode = false;
+	// 进入前清理上一次状态
+	clearHyperbolaWorkingState();
+	// 复用接触点检测与显示
+	calculateContactPoints();
+	updateModeButtons();
+}
+
+function exitHyperbolaMode() {
+	isHyperbolaMode = false;
+	clearHyperbolaWorkingState();
+	clearContactPoints();
+	updateModeButtons();
+}
+
+function enterParabolaMode() {
+	isParabolaMode = true;
+	isDrawingMode = false;
+	isEditMode = false;
+	// 清理旧状态
+	clearParabolaWorkingState();
+	updateModeButtons();
+}
+
+function exitParabolaMode() {
+	isParabolaMode = false;
+	clearParabolaWorkingState();
+	updateModeButtons();
+}
+
 function clearDrawing() {
 	deselectAllPoints();
 	points = [];
@@ -520,6 +569,8 @@ function clearDrawing() {
 	}
 	// 清除接触点
 	clearContactPoints();
+	// 清除双曲线工作态
+	clearHyperbolaWorkingState();
 	updateExportAvailability();
 }
 
@@ -785,6 +836,12 @@ function onCanvasMouseUp(event) {
 	if (isContactPointsMode) {
 		handleContactPointSelection();
 	}
+	if (isHyperbolaMode) {
+		handleHyperbolaMouseUp();
+	}
+	if (isParabolaMode) {
+		handleParabolaMouseUp();
+	}
 }
 
 // Contact point selection and path generation
@@ -822,6 +879,596 @@ function handleContactPointSelection() {
 	if (selectedContactPoints.length === 2) {
 		generatePathFromContactPoints();
 	}
+}
+
+// Hyperbola mode interactions
+function handleHyperbolaMouseUp() {
+	raycaster.setFromCamera(mouse, camera);
+	// 阶段1：选择两个接触点
+	if (hyperbolaSelectedContactPoints.length < 2) {
+		const intersects = raycaster.intersectObjects(contactPointMarkers);
+		if (intersects.length === 0) return;
+		const marker = intersects[0].object;
+		const index = marker.userData.index;
+		// 切换选择
+		const exists = hyperbolaSelectedContactPoints.includes(index);
+		if (exists) {
+			hyperbolaSelectedContactPoints = hyperbolaSelectedContactPoints.filter(i => i !== index);
+			marker.material.color.set(CONTACT_POINT_COLOR);
+			setStatus(`双曲线：已取消接触点 ${index + 1}，当前选择：${hyperbolaSelectedContactPoints.length}/2`);
+			return;
+		}
+		if (hyperbolaSelectedContactPoints.length >= 2) {
+			resetHyperbolaContactSelectionColors();
+			hyperbolaSelectedContactPoints = [];
+		}
+		hyperbolaSelectedContactPoints.push(index);
+		marker.material.color.set(SELECTED_CONTACT_POINT_COLOR);
+		setStatus(`双曲线：已选择接触点 ${index + 1}，当前选择：${hyperbolaSelectedContactPoints.length}/2`);
+		if (hyperbolaSelectedContactPoints.length === 2) {
+			prepareHyperbolaShortCurve();
+			generateHyperbolaPath();
+		}
+	}
+}
+
+function clearHyperbolaWorkingState() {
+	resetHyperbolaContactSelectionColors();
+	hyperbolaSelectedContactPoints = [];
+	hyperbolaShortCurvePoints = [];
+	if (hyperbolaGuideLine) {
+		scene.remove(hyperbolaGuideLine);
+		hyperbolaGuideLine.geometry?.dispose?.();
+		hyperbolaGuideLine.material?.dispose?.();
+		hyperbolaGuideLine = null;
+	}
+}
+
+function clearParabolaWorkingState() {
+	parabolaPickedPoints = [];
+	parabolaMarkers.forEach(m => { scene.remove(m); });
+	parabolaMarkers = [];
+}
+
+function resetHyperbolaContactSelectionColors() {
+	if (!contactPointMarkers.length) return;
+	contactPointMarkers.forEach(m => m.material.color.set(CONTACT_POINT_COLOR));
+}
+
+function prepareHyperbolaShortCurve() {
+	const startIndex = hyperbolaSelectedContactPoints[0];
+	const endIndex = hyperbolaSelectedContactPoints[1];
+	const pathPoints = getCurvePointsBetweenIndices(contactPoints, startIndex, endIndex);
+	hyperbolaShortCurvePoints = pathPoints.map(p => p.clone());
+	// 显示引导线
+	if (hyperbolaGuideLine) {
+		scene.remove(hyperbolaGuideLine);
+		hyperbolaGuideLine.geometry?.dispose?.();
+		hyperbolaGuideLine.material?.dispose?.();
+		hyperbolaGuideLine = null;
+	}
+	const g = new THREE.BufferGeometry().setFromPoints(hyperbolaShortCurvePoints);
+	const m = new THREE.LineBasicMaterial({ color: 0x00aaff });
+	hyperbolaGuideLine = new THREE.Line(g, m);
+	scene.add(hyperbolaGuideLine);
+}
+
+function generateHyperbolaPath() {
+	if (hyperbolaSelectedContactPoints.length !== 2 || hyperbolaShortCurvePoints.length < 2) return;
+	// 自动从短曲线上选取3个中间采样点（按弧长25%、50%、75%）
+	const autoMid = pickAutoThreeSamples(hyperbolaShortCurvePoints);
+	// 构造用于拟合的平面：用端点和中间点近似最佳平面
+	const plane = estimateBestFitPlane([hyperbolaShortCurvePoints[0], ...autoMid, hyperbolaShortCurvePoints[hyperbolaShortCurvePoints.length - 1]]);
+	const basis = buildPlaneBasis(plane.normal);
+	const centroid = plane.point;
+	const end1 = toPlane2D(hyperbolaShortCurvePoints[0], centroid, basis.u, basis.v);
+	const end2 = toPlane2D(hyperbolaShortCurvePoints[hyperbolaShortCurvePoints.length - 1], centroid, basis.u, basis.v);
+	const mids2 = autoMid.map(p => toPlane2D(p, centroid, basis.u, basis.v));
+	// 约束拟合：必须通过两个端点；最小二乘拟合中间三个
+	const conic = fitConicConstrainedThrough(end1, end2, mids2);
+	let generated2D = [];
+	if (conic && isHyperbolaConic(conic)) {
+		generated2D = sampleHyperbolaConicConstrained(conic, end1, end2, mids2, smoothPointsCount);
+	} else {
+		// 退化：用短曲线的点进行平滑插值
+		const crv = new THREE.CatmullRomCurve3(hyperbolaShortCurvePoints, false, 'catmullrom', 0.5);
+		const arr = crv.getPoints(smoothPointsCount);
+		saveState();
+		points = arr;
+		redrawScene();
+		setStatus('双曲线拟合失败，已使用平滑曲线替代。');
+		return;
+	}
+	// 映射回3D
+	const generated3D = generated2D.map(p2 => fromPlane2D(p2, centroid, basis.u, basis.v));
+	saveState();
+	points = generated3D;
+	redrawScene();
+	setStatus('双曲线路径已生成（通过两端点，拟合中间三点）。');
+	// 退出/清理工作态但保留模式方便再次生成
+	clearHyperbolaWorkingState();
+}
+
+// Parabola mode interactions
+function handleParabolaMouseUp() {
+	raycaster.setFromCamera(mouse, camera);
+	const intersects = raycaster.intersectObject(modelMesh);
+	if (intersects.length === 0) return;
+	const p = getOffsetPoint(intersects[0]);
+	addParabolaMarker(p);
+	parabolaPickedPoints.push(p.clone());
+	setStatus(`抛物线：已选择 ${parabolaPickedPoints.length}/3 个点`);
+	if (parabolaPickedPoints.length === 3) {
+		generateParabolaPath(parabolaPickedPoints[0], parabolaPickedPoints[1], parabolaPickedPoints[2]);
+		clearParabolaWorkingState();
+		setStatus('抛物线路径已生成。');
+	}
+}
+
+function addParabolaMarker(p) {
+	const geom = new THREE.SphereGeometry(0.35, 16, 16);
+	const mat = new THREE.MeshBasicMaterial({ color: PARABOLA_MARKER_COLOR });
+	const marker = new THREE.Mesh(geom, mat);
+	marker.position.copy(p);
+	scene.add(marker);
+	parabolaMarkers.push(marker);
+}
+
+function generateParabolaPath(p1, p2, p3) {
+	// 三点定义平面
+	const plane = new THREE.Plane().setFromCoplanarPoints(p1, p2, p3);
+	const n = plane.normal.clone().normalize();
+	// 在平面内设置基：u 沿 p1->p3，v = n x u
+	let u = new THREE.Vector3().subVectors(p3, p1);
+	// 去除法向分量确保在平面内
+	u.sub(n.clone().multiplyScalar(u.dot(n)));
+	const lenU = u.length();
+	if (lenU < 1e-6) {
+		// 若p1与p3过近，尝试使用p1->p2方向
+		u = new THREE.Vector3().subVectors(p2, p1);
+		u.sub(n.clone().multiplyScalar(u.dot(n)));
+	}
+	u.normalize();
+	const v = new THREE.Vector3().crossVectors(n, u).normalize();
+	const origin = p1.clone();
+	// 投影到2D并以p1为原点
+	function to2D(p) { const d = new THREE.Vector3().subVectors(p, origin); return { x: d.dot(u), y: d.dot(v) }; }
+	const P1 = { x: 0, y: 0 };
+	const P2 = to2D(p2);
+	const P3 = to2D(p3);
+	// 拟合 y = a x^2 + b x + c 通过三点
+	const aMat = [
+		[P1.x * P1.x, P1.x, 1],
+		[P2.x * P2.x, P2.x, 1],
+		[P3.x * P3.x, P3.x, 1]
+	];
+	const yVec = [P1.y, P2.y, P3.y];
+	const coeff = solve3x3(aMat, yVec);
+	if (!coeff) {
+		// 退化回CatmullRom通过三点
+		const crv = new THREE.CatmullRomCurve3([p1, p2, p3], false, 'catmullrom', 0.5);
+		const arr = crv.getPoints(smoothPointsCount);
+		saveState(); points = arr; redrawScene();
+		return;
+	}
+	const [a, b, c] = coeff;
+	// 采样x从0到P3.x方向，保持与p1->p3一致的方向
+	const xStart = 0;
+	const xEnd = P3.x;
+	const samples = [];
+	for (let i = 0; i < smoothPointsCount; i++) {
+		const t = i / (smoothPointsCount - 1);
+		const x = xStart + (xEnd - xStart) * t;
+		const y = a * x * x + b * x + c;
+		samples.push({ x, y });
+	}
+	// 映射回3D
+	const result3D = samples.map(p => origin.clone().add(u.clone().multiplyScalar(p.x)).add(v.clone().multiplyScalar(p.y)));
+	saveState();
+	points = result3D;
+	redrawScene();
+}
+
+function solve3x3(A, b) {
+	// 解 Ax=b，直接求逆或克拉默法则
+	const m = A;
+	const d = det3(m);
+	if (Math.abs(d) < 1e-9) return null;
+	const inv = inv3(m);
+	if (!inv) return null;
+	const x = [
+		inv[0][0] * b[0] + inv[0][1] * b[1] + inv[0][2] * b[2],
+		inv[1][0] * b[0] + inv[1][1] * b[1] + inv[1][2] * b[2],
+		inv[2][0] * b[0] + inv[2][1] * b[1] + inv[2][2] * b[2]
+	];
+	return x;
+}
+
+function det3(m) {
+	return m[0][0]*(m[1][1]*m[2][2]-m[1][2]*m[2][1]) - m[0][1]*(m[1][0]*m[2][2]-m[1][2]*m[2][0]) + m[0][2]*(m[1][0]*m[2][1]-m[1][1]*m[2][0]);
+}
+
+function inv3(m) {
+	const d = det3(m);
+	if (Math.abs(d) < 1e-9) return null;
+	const inv = [
+		[
+			(m[1][1]*m[2][2]-m[1][2]*m[2][1])/d,
+			-(m[0][1]*m[2][2]-m[0][2]*m[2][1])/d,
+			(m[0][1]*m[1][2]-m[0][2]*m[1][1])/d
+		],
+		[
+			-(m[1][0]*m[2][2]-m[1][2]*m[2][0])/d,
+			(m[0][0]*m[2][2]-m[0][2]*m[2][0])/d,
+			-(m[0][0]*m[1][2]-m[0][2]*m[1][0])/d
+		],
+		[
+			(m[1][0]*m[2][1]-m[1][1]*m[2][0])/d,
+			-(m[0][0]*m[2][1]-m[0][1]*m[2][0])/d,
+			(m[0][0]*m[1][1]-m[0][1]*m[1][0])/d
+		]
+	];
+	return inv;
+}
+
+// Utility: estimate plane, basis, projections
+function estimateBestFitPlane(pts) {
+	// 质心
+	const c = new THREE.Vector3();
+	pts.forEach(p => c.add(p));
+	c.divideScalar(pts.length);
+	// 协方差矩阵
+	let xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
+	for (const p of pts) {
+		const dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
+		xx += dx * dx; xy += dx * dy; xz += dx * dz;
+		yy += dy * dy; yz += dy * dz; zz += dz * dz;
+	}
+	const cov = [
+		[xx, xy, xz],
+		[xy, yy, yz],
+		[xz, yz, zz]
+	];
+	const normal = smallestEigenVector3(cov);
+	return { point: c, normal };
+}
+
+function buildPlaneBasis(normal) {
+	const n = normal.clone().normalize();
+	const tmp = Math.abs(n.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+	const u = new THREE.Vector3().crossVectors(tmp, n).normalize();
+	const v = new THREE.Vector3().crossVectors(n, u).normalize();
+	return { u, v, n };
+}
+
+function toPlane2D(p, origin, u, v) {
+	const d = new THREE.Vector3().subVectors(p, origin);
+	return { x: d.dot(u), y: d.dot(v) };
+}
+
+function fromPlane2D(p2, origin, u, v) {
+	return new THREE.Vector3().copy(origin).add(u.clone().multiplyScalar(p2.x)).add(v.clone().multiplyScalar(p2.y));
+}
+
+function intersectRayWithPlaneOfPoints(pts) {
+	if (pts.length < 3) return null;
+	const plane = estimateBestFitPlane(pts);
+	const n = plane.normal.clone().normalize();
+	const p0 = plane.point.clone();
+	raycaster.setFromCamera(mouse, camera);
+	const rOrigin = raycaster.ray.origin.clone();
+	const rDir = raycaster.ray.direction.clone();
+	const denom = n.dot(rDir);
+	if (Math.abs(denom) < 1e-6) return null;
+	const t = n.dot(p0.clone().sub(rOrigin)) / denom;
+	if (t < 0) return null;
+	return rOrigin.add(rDir.multiplyScalar(t));
+}
+
+function projectPointToPolyline(p, poly) {
+	if (poly.length < 2) return null;
+	let best = null;
+	let bestDist2 = Infinity;
+	for (let i = 0; i < poly.length - 1; i++) {
+		const a = poly[i];
+		const b = poly[i + 1];
+		const ab = new THREE.Vector3().subVectors(b, a);
+		const ap = new THREE.Vector3().subVectors(p, a);
+		const t = Math.max(0, Math.min(1, ap.dot(ab) / ab.lengthSq()));
+		const q = a.clone().add(ab.multiplyScalar(t));
+		const d2 = q.distanceToSquared(p);
+		if (d2 < bestDist2) { bestDist2 = d2; best = q; }
+	}
+	return best;
+}
+
+function smallestEigenVector3(m) {
+	// Power iteration on inverse via Jacobi for 3x3 symmetric matrix
+	// Using simple Jacobi eigenvalue algorithm
+	let a11 = m[0][0], a12 = m[0][1], a13 = m[0][2];
+	let a22 = m[1][1], a23 = m[1][2];
+	let a33 = m[2][2];
+	let v = [1, 0, 0], w = [0, 1, 0], u = [0, 0, 1];
+	function rotate(p, q, angle) {
+		const c = Math.cos(angle), s = Math.sin(angle);
+		for (const vec of [v, w, u]) {
+			const ip = vec[p], iq = vec[q];
+			vec[p] = c * ip - s * iq;
+			vec[q] = s * ip + c * iq;
+		}
+	}
+	for (let k = 0; k < 10; k++) {
+		// find largest off-diagonal
+		let p = 0, q = 1, max = Math.abs(a12);
+		if (Math.abs(a13) > max) { max = Math.abs(a13); p = 0; q = 2; }
+		if (Math.abs(a23) > max) { max = Math.abs(a23); p = 1; q = 2; }
+		if (max < 1e-9) break;
+		let app, aqq, apq;
+		if (p === 0 && q === 1) { app = a11; aqq = a22; apq = a12; }
+		if (p === 0 && q === 2) { app = a11; aqq = a33; apq = a13; }
+		if (p === 1 && q === 2) { app = a22; aqq = a33; apq = a23; }
+		const phi = 0.5 * Math.atan2(2 * apq, (aqq - app));
+		rotate(p, q, phi);
+		// Update matrix entries approximately (not needed for final eigenvector direction quality)
+		const c = Math.cos(phi), s = Math.sin(phi);
+		function rot(a, b, cval, sval) { const t = cval * a - sval * b; return { x: t, y: sval * a + cval * b }; }
+		if (p === 0 && q === 1) {
+			const r1 = rot(a11, a12, c, s); const r2 = rot(a12, a22, c, s);
+			a11 = r1.x; a12 = r1.y; a22 = r2.y;
+			const r13 = rot(a13, a23, c, s); a13 = r13.x; a23 = r13.y;
+		}
+		if (p === 0 && q === 2) {
+			const r1 = rot(a11, a13, c, s); const r2 = rot(a13, a33, c, s);
+			a11 = r1.x; a13 = r1.y; a33 = r2.y;
+			const r12 = rot(a12, a23, c, s); a12 = r12.x; a23 = r12.y;
+		}
+		if (p === 1 && q === 2) {
+			const r1 = rot(a22, a23, c, s); const r2 = rot(a23, a33, c, s);
+			a22 = r1.x; a23 = r1.y; a33 = r2.y;
+			const r12 = rot(a12, a13, c, s); a12 = r12.x; a13 = r12.y;
+		}
+	}
+	// Smallest eigenvector approximated as the column with smallest variance direction -> pick u,w,v minimal? For simplicity, return normalizing cross of v and w to ensure orthonormal set roughly
+	const ev = new THREE.Vector3(v[0], v[1], v[2]).normalize();
+	const ew = new THREE.Vector3(w[0], w[1], w[2]).normalize();
+	let n = new THREE.Vector3().crossVectors(ev, ew).normalize();
+	if (!Number.isFinite(n.x)) n = new THREE.Vector3(0, 0, 1);
+	return n;
+}
+
+// Conic fit utilities
+function fitConic(pts2) {
+	if (pts2.length < 5) return null;
+	// Build design matrix D
+	const D = [];
+	for (const p of pts2) {
+		const x = p.x, y = p.y;
+		D.push([x * x, x * y, y * y, x, y, 1]);
+	}
+	const svd = svdDecompose(D);
+	if (!svd) return null;
+	const V = svd.V; // columns are right singular vectors
+	const p = V.map(row => row[5]); // last column
+	return { a: p[0], b: p[1], c: p[2], d: p[3], e: p[4], f: p[5] };
+}
+
+function isHyperbolaConic(conic) {
+	const { a, b, c } = conic;
+	return (4 * a * c - b * b) < 0;
+}
+
+function sampleHyperbolaConic(conic, samplePts, count) {
+	// Sample within bbox of samplePts
+	let minX = Infinity, maxX = -Infinity;
+	for (const p of samplePts) { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; }
+	const xs = [];
+	for (let i = 0; i < count; i++) xs.push(minX + (maxX - minX) * (i / (count - 1)));
+	const res = [];
+	const { a, b, c, d, e, f } = conic;
+	for (const x of xs) {
+		// Solve quadratic in y: (c) y^2 + (b x + e) y + (a x^2 + d x + f) = 0
+		const qa = c;
+		const qb = b * x + e;
+		const qc = a * x * x + d * x + f;
+		const disc = qb * qb - 4 * qa * qc;
+		if (disc < 0) continue;
+		const sdisc = Math.sqrt(Math.max(0, disc));
+		const y1 = (-qb + sdisc) / (2 * qa);
+		const y2 = (-qb - sdisc) / (2 * qa);
+		// Pick branch closer to sample median y
+		const medianY = samplePts.map(p => p.y).sort((m, n) => m - n)[Math.floor(samplePts.length / 2)];
+		const y = Math.abs(y1 - medianY) < Math.abs(y2 - medianY) ? y1 : y2;
+		res.push({ x, y });
+	}
+	// Ensure monotonic order by x
+	res.sort((p, q) => p.x - q.x);
+	return res;
+}
+
+// Auto pick 3 internal samples along the polyline by cumulative arc length ratios
+function pickAutoThreeSamples(poly) {
+	const ratios = [0.25, 0.5, 0.75];
+	const cum = [0];
+	let total = 0;
+	for (let i = 1; i < poly.length; i++) {
+		total += poly[i - 1].distanceTo(poly[i]);
+		cum.push(total);
+	}
+	if (total === 0) return [];
+	const res = [];
+	for (const r of ratios) {
+		const target = r * total;
+		// locate segment
+		let j = 1; while (j < cum.length && cum[j] < target) j++;
+		if (j >= cum.length) { res.push(poly[poly.length - 1].clone()); continue; }
+		const segLen = cum[j] - cum[j - 1];
+		const t = segLen > 0 ? (target - cum[j - 1]) / segLen : 0;
+		const p = poly[j - 1].clone().lerp(poly[j], t);
+		res.push(p);
+	}
+	return res;
+}
+
+// Fit general conic with constraints passing through two endpoints; least squares on middle three
+// Conic form: A x^2 + B x y + C y^2 + D x + E y + F = 0 (vector q=[A,B,C,D,E,F])
+function fitConicConstrainedThrough(p1, p2, middlePts) {
+	// Constraint matrix C q = 0 for endpoints
+	function rowFromPoint(pt) { const x = pt.x, y = pt.y; return [x * x, x * y, y * y, x, y, 1]; }
+	const C = [rowFromPoint(p1), rowFromPoint(p2)];
+	// Nullspace of C (dimension 4)
+	const Ns = nullSpace(C);
+	if (!Ns) return null;
+	// Represent q = Ns * z, minimize ||A q|| where A from middle points
+	const A = middlePts.map(rowFromPoint);
+	// Build M = A * Ns, solve min ||M z|| -> eigen of (M^T M)
+	const M = A.map(aRow => {
+		const out = new Array(Ns[0].length).fill(0);
+		for (let j = 0; j < Ns.length; j++) {
+			const coeff = aRow[j];
+			for (let k = 0; k < Ns[0].length; k++) out[k] += coeff * Ns[j][k];
+		}
+		return out;
+	});
+	const MtM = Array.from({ length: Ns[0].length }, () => Array(Ns[0].length).fill(0));
+	for (let i = 0; i < M.length; i++) for (let j = 0; j < MtM.length; j++) for (let k = 0; k < MtM.length; k++) MtM[j][k] += M[i][j] * M[i][k];
+	const eig = eigenSymmetric(MtM);
+	if (!eig) return null;
+	const order = eig.values.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v).map(o => o.i);
+	const z = order.map(i => (i === 0 ? 1 : 0)); // take eigenvector with min eigenvalue; build explicit vector below
+	// Actually need the actual eigenvector column
+	const V = eig.vectors;
+	const zvec = V.map(row => row[order[0]]);
+	// q = Ns * zvec
+	const q = new Array(6).fill(0);
+	for (let j = 0; j < Ns.length; j++) for (let k = 0; k < Ns[0].length; k++) q[j] += Ns[j][k] * zvec[k];
+	return { a: q[0], b: q[1], c: q[2], d: q[3], e: q[4], f: q[5] };
+}
+
+// Compute nullspace basis of matrix C (m x n), return n x r matrix columns as basis
+function nullSpace(C) {
+	const m = C.length; const n = C[0].length;
+	// SVD of C to get V; nullspace are columns where singular value ~ 0
+	const svd = svdDecompose(C);
+	if (!svd) return null;
+	const V = svd.V; // n x n
+	// We need last n - rank columns; with two constraints on general position -> rank 2 -> r=4
+	const r = Math.max(1, n - 2);
+	const Ns = Array.from({ length: n }, () => Array(r).fill(0));
+	for (let j = 0; j < r; j++) {
+		const col = V.map(row => row[n - r + j]);
+		for (let i = 0; i < n; i++) Ns[i][j] = col[i];
+	}
+	return Ns;
+}
+
+// Sample the constrained hyperbola ensuring endpoints are included as first/last samples
+function sampleHyperbolaConicConstrained(conic, end1, end2, mids, count) {
+	// Sample by x between endpoints in 2D; ensure end1->end2 ordering by x
+	let a = end1, b = end2;
+	let reverse = false;
+	if (a.x > b.x) { const t = a; a = b; b = t; reverse = true; }
+	const xs = [];
+	for (let i = 0; i < count; i++) xs.push(a.x + (b.x - a.x) * (i / (count - 1)));
+	const { A, branchYs } = precomputeBranchSelector(conic, mids);
+	const res = [];
+	for (let i = 0; i < xs.length; i++) {
+		const x = xs[i];
+		const ys = solveConicY(conic, x);
+		if (!ys) continue;
+		const y = selectBranch(ys, branchYs);
+		res.push({ x, y });
+	}
+	if (reverse) res.reverse();
+	// Replace first/last exactly with endpoints to enforce pass-through
+	if (res.length) { res[0] = { x: end1.x, y: end1.y }; res[res.length - 1] = { x: end2.x, y: end2.y }; }
+	return res;
+}
+
+function precomputeBranchSelector(conic, mids) {
+	const branchYs = mids.map(p => p.y).sort((a, b) => a - b);
+	return { A: 0, branchYs };
+}
+
+function solveConicY(conic, x) {
+	const { a, b, c, d, e, f } = conic;
+	const qa = c;
+	const qb = b * x + e;
+	const qc = a * x * x + d * x + f;
+	const disc = qb * qb - 4 * qa * qc;
+	if (disc < 0) return null;
+	const s = Math.sqrt(Math.max(0, disc));
+	return [(-qb + s) / (2 * qa), (-qb - s) / (2 * qa)];
+}
+
+function selectBranch(ys, branchYs) {
+	// choose y closer to median of middle samples
+	const median = branchYs[Math.floor(branchYs.length / 2)];
+	return Math.abs(ys[0] - median) < Math.abs(ys[1] - median) ? ys[0] : ys[1];
+}
+
+// Basic SVD via numeric.js-like power method fallback (small sizes)
+function svdDecompose(A) {
+	// Use Gram matrix to get V via eigen of A^T A, then compute U,S lightly. Sufficient to get V's last column.
+	const m = A.length; if (m === 0) return null; const n = A[0].length;
+	// Compute AtA
+	const AtA = Array.from({ length: n }, () => Array(n).fill(0));
+	for (let i = 0; i < m; i++) {
+		for (let j = 0; j < n; j++) {
+			for (let k = 0; k < n; k++) {
+				AtA[j][k] += A[i][j] * A[i][k];
+			}
+		}
+	}
+	// Eigen decomposition of AtA (symmetric)
+	const eig = eigenSymmetric(AtA);
+	if (!eig) return null;
+	// Sort by eigenvalues ascending (smallest gives smallest singular vector)
+	const idx = eig.values.map((v, i) => ({ v, i })).sort((p, q) => p.v - q.v).map(o => o.i);
+	const V = eig.vectors.map(row => idx.map(i => row[i]));
+	return { V };
+}
+
+function eigenSymmetric(M) {
+	const n = M.length;
+	// Jacobi eigenvalue algorithm
+	let A = M.map(row => row.slice());
+	let V = Array.from({ length: n }, (_, i) => {
+		const r = Array(n).fill(0); r[i] = 1; return r;
+	});
+	for (let iter = 0; iter < 50; iter++) {
+		// find largest off-diagonal
+		let p = 0, q = 1, max = Math.abs(A[0][1]);
+		for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+			const val = Math.abs(A[i][j]);
+			if (val > max) { max = val; p = i; q = j; }
+		}
+		if (max < 1e-10) break;
+		const app = A[p][p], aqq = A[q][q], apq = A[p][q];
+		const phi = 0.5 * Math.atan2(2 * apq, (aqq - app));
+		const c = Math.cos(phi), s = Math.sin(phi);
+		// Rotate A
+		for (let i = 0; i < n; i++) {
+			const aip = A[i][p], aiq = A[i][q];
+			A[i][p] = c * aip - s * aiq;
+			A[i][q] = s * aip + c * aiq;
+		}
+		for (let j = 0; j < n; j++) {
+			const apj = A[p][j], aqj = A[q][j];
+			A[p][j] = c * apj - s * aqj;
+			A[q][j] = s * apj + c * aqj;
+		}
+		A[p][p] = c * c * app - 2 * s * c * apq + s * s * aqq;
+		A[q][q] = s * s * app + 2 * s * c * apq + c * c * aqq;
+		A[p][q] = A[q][p] = 0;
+		// Rotate V
+		for (let i = 0; i < n; i++) {
+			const vip = V[i][p], viq = V[i][q];
+			V[i][p] = c * vip - s * viq;
+			V[i][q] = s * vip + c * viq;
+		}
+	}
+	const values = Array.from({ length: n }, (_, i) => A[i][i]);
+	return { values, vectors: V };
 }
 
 function generatePathFromContactPoints() {
@@ -1203,9 +1850,19 @@ function wireEvents() {
 		const mode = designModeSelect.value;
 		if (mode === 'contact-points') {
 			toggleContactPointsMode();
+		} else if (mode === 'parabola') {
+			if (isContactPointsMode) toggleContactPointsMode();
+			if (isHyperbolaMode) exitHyperbolaMode();
+			enterParabolaMode();
 		} else {
 			if (isContactPointsMode) {
 				toggleContactPointsMode(); // 退出接触点模式
+			}
+			if (isHyperbolaMode) {
+				exitHyperbolaMode();
+			}
+			if (isParabolaMode) {
+				exitParabolaMode();
 			}
 			updateArchCurve();
 		}
