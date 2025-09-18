@@ -867,17 +867,15 @@ async function generateAIPath() {
 	
 	// 获取用户自定义prompt或使用默认prompt
 	const customPrompt = aiPromptInput.value.trim();
-	const defaultPrompt = `你是一个专业的牙科正畸专家，需要根据参考平面与牙模的接触点数据生成最优的唇弓路径。
+	const defaultPrompt = `你是一个专业的牙科正畸专家，需要根据参考平面与牙模的接触点数据生成最优的前牙唇弓弯折线，参考平面位于前牙牙模牙齿1/2处。
 
 接触点数据：
 ${JSON.stringify(contactPointsData, null, 2)}
 
-请分析这些接触点，并选择最合适的点来生成一条平滑、符合正畸学原理的唇弓路径。考虑以下因素：
-1. 接触点的分布和密度
-2. 唇弓的生理曲线特征
-3. 正畸治疗的最佳路径
-4. 避免过于尖锐的转折
-
+请分析这些接触点位于牙齿哪个位置，并选择最合适的点来生成一条平滑的前牙唇弓弯折线。考虑以下因素：
+1. 选点要求：在左侧尖牙中 1/2 处到前牙牙冠1/2处再到右侧尖牙中 1/2 处选择且起点和终点分别位于左侧尖牙中 1/2 处和右侧尖牙中 1/2 处。
+2. 弓丝的弧度要求：需与前牙紧密接触，确保力的均匀分布。
+3. 应当只在前牙前缘选择点，不要选择前牙后缘的点，也不要选左右尖牙往两边延伸的点，只选左右尖牙中间的点。
 请返回一个JSON格式的响应，包含：
 {
   "selectedPoints": [
@@ -888,7 +886,7 @@ ${JSON.stringify(contactPointsData, null, 2)}
   "pathType": "路径类型描述（如：平滑曲线、抛物线等）"
 }
 
-请确保selectedPoints数组包含8-15个点，这些点应该能够形成一条平滑的唇弓路径。`;
+请确保selectedPoints数组包含7-10个点，这些点应该能够形成一条平滑的唇弓路径。`;
 
 	const prompt = customPrompt || defaultPrompt;
 	
