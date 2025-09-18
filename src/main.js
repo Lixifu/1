@@ -23,6 +23,8 @@ let isEditMode = false;
 let isContactPointsMode = false;
 let isHyperbolaMode = false; // 已废弃，不再从UI进入
 let isParabolaMode = false;
+let isAIGenerationMode = false;
+let lastAIResponse = null; // 存储最后的AI响应用于调试导出
 
 // Selection for U-loop
 const SELECTION_COLOR_ULOOP = 0x9932CC;
@@ -75,6 +77,14 @@ const wireDiameterInput = document.getElementById('wire-diameter-input');
 const markerDiameterInput = document.getElementById('marker-diameter-input');
 const controlPointsInput = document.getElementById('control-points-input');
 const smoothPointsInput = document.getElementById('smooth-points-input');
+// AI Generation UI elements
+const aiModeUI = document.getElementById('ai-mode-ui');
+const geminiApiKeyInput = document.getElementById('gemini-api-key');
+const aiPromptInput = document.getElementById('ai-prompt');
+const generateAiPathBtn = document.getElementById('generate-ai-path');
+const exportContactPointsBtn = document.getElementById('export-contact-points');
+const exportAiResponseBtn = document.getElementById('export-ai-response');
+const aiStatusEl = document.getElementById('ai-status');
 // Removed U-loop parameters
 
 // Geometry params (with defaults from design specs)
@@ -315,6 +325,11 @@ function calculateContactPoints() {
 	});
 	
 	setStatus(`找到 ${contactPoints.length} 个接触点`);
+	
+	// 如果当前是AI模式，更新AI模式按钮状态
+	if (isAIGenerationMode) {
+		updateAIModeButtons();
+	}
 }
 
 // 按照角度对接触点进行排序
@@ -486,9 +501,485 @@ function updateModeButtons() {
 	if (isParabolaMode) {
 		setStatus('抛物线模式：在牙模上点击选择3个点进行拟合。');
 	}
-	if (!isDrawingMode && !isEditMode && !isPlaneMode && !isContactPointsMode && !isHyperbolaMode) {
+	if (isAIGenerationMode) {
+		setStatus('AI生成模式：自动分析接触点并生成最优路径。');
+	}
+	if (!isDrawingMode && !isEditMode && !isPlaneMode && !isContactPointsMode && !isHyperbolaMode && !isAIGenerationMode) {
 		setStatus('请选择操作模式。');
 	}
+}
+
+function updateAIModeButtons() {
+	const hasApiKey = geminiApiKeyInput.value.trim().length > 0;
+	const hasContactPoints = contactPoints.length > 0;
+	const hasAIResponse = lastAIResponse !== null;
+	
+	generateAiPathBtn.disabled = !hasApiKey || !hasContactPoints;
+	exportContactPointsBtn.disabled = !hasContactPoints;
+	exportAiResponseBtn.disabled = !hasAIResponse;
+}
+
+// Gemini API integration
+async function callGeminiAPI(apiKey, prompt, contactPointsData) {
+	// 尝试多个可用的模型
+	const models = [
+		'gemini-2.5-flash',
+		'gemini-2.5-pro',
+		'gemini-1.5-flash'
+	];
+	
+	for (const model of models) {
+		try {
+			const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+			console.log(`尝试使用模型: ${model}`);
+			return await callGeminiAPIWithModel(url, prompt, contactPointsData);
+		} catch (error) {
+			console.warn(`模型 ${model} 失败:`, error.message);
+			if (model === models[models.length - 1]) {
+				// 如果所有模型都失败了，抛出最后一个错误
+				throw error;
+			}
+		}
+	}
+}
+
+async function callGeminiAPIWithModel(url, prompt, contactPointsData) {
+	// 简化请求格式，避免复杂的schema导致500错误
+	const requestBody = {
+		contents: [{
+			parts: [{
+				text: `${prompt}\n\n接触点数据（JSON格式）：\n${JSON.stringify(contactPointsData, null, 2)}`
+			}]
+		}],
+		generationConfig: {
+			temperature: 0.7,
+			topK: 40,
+			topP: 0.95,
+			maxOutputTokens: 2048,
+		}
+	};
+	
+	try {
+		console.log('调用Gemini API，URL:', url);
+		console.log('请求体:', JSON.stringify(requestBody, null, 2));
+		
+		const response = await fetch(url, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify(requestBody)
+		});
+		
+		console.log('API响应状态:', response.status, response.statusText);
+		
+		if (!response.ok) {
+			const errorText = await response.text();
+			console.error('API错误响应:', errorText);
+			throw new Error(`API请求失败: ${response.status} ${response.statusText}. 响应: ${errorText}`);
+		}
+		
+		const data = await response.json();
+		console.log('API响应数据:', data);
+		// 安全策略拦截提示
+		if (data.promptFeedback && data.promptFeedback.blockReason) {
+			const reason = data.promptFeedback.blockReason;
+			throw new Error(`提示被安全策略拦截（${reason}）。请尝试修改prompt或降低敏感内容。`);
+		}
+		
+		// 先尝试结构化提取
+		const structured = extractStructuredResult(data);
+		if (structured) {
+			// 保存AI响应用于调试
+			saveAIResponseForDebug(data, structured);
+			return JSON.stringify(structured);
+		}
+		// 再退化为提取文本
+		const text = extractTextFromResponse(data);
+		if (text) {
+			// 保存AI响应用于调试
+			saveAIResponseForDebug(data, { rawText: text });
+			return text;
+		}
+		throw new Error('API返回数据中没有找到文本内容');
+	} catch (error) {
+		console.error('Gemini API调用失败:', error);
+		throw error;
+	}
+}
+
+// 从API响应中尽可能提取可读文本
+function extractTextFromResponse(data) {
+  try {
+    if (!data) return '';
+    // 1) candidates[].content.parts[].text
+    if (Array.isArray(data.candidates)) {
+      for (const c of data.candidates) {
+        if (c && c.content && Array.isArray(c.content.parts)) {
+          const texts = c.content.parts
+            .map(p => (p && typeof p.text === 'string') ? p.text : '')
+            .filter(Boolean);
+          if (texts.length) return texts.join('\n');
+        }
+        // 2) candidates[].text 或 candidates[].output_text（某些变体）
+        if (typeof c?.text === 'string' && c.text.length) return c.text;
+        if (typeof c?.output_text === 'string' && c.output_text.length) return c.output_text;
+      }
+    }
+    // 3) 顶层简化字段（极少数变体）
+    if (typeof data.text === 'string' && data.text.length) return data.text;
+    if (typeof data.output_text === 'string' && data.output_text.length) return data.output_text;
+  } catch (e) {
+    console.warn('extractTextFromResponse 失败:', e);
+  }
+  return '';
+}
+
+// 从响应对象中提取结构化 { selectedPoints, reasoning, pathType }
+function extractStructuredResult(data) {
+  try {
+    if (!data) return null;
+    // 尝试解析 parts.inlineData 的 base64 JSON
+    const inline = extractInlineJSON(data);
+    if (inline) {
+      const found = findSelectedPointsObject(inline);
+      if (found) return found;
+    }
+    // 直接在响应对象中递归查找
+    const found = findSelectedPointsObject(data);
+    if (found) return found;
+  } catch (e) {
+    console.warn('extractStructuredResult 失败:', e);
+  }
+  return null;
+}
+
+function extractInlineJSON(data) {
+  try {
+    if (!Array.isArray(data.candidates)) return null;
+    for (const c of data.candidates) {
+      if (!c?.content?.parts) continue;
+      for (const p of c.content.parts) {
+        const inl = p?.inlineData;
+        if (inl && typeof inl.data === 'string' && inl.data.length && /json/i.test(inl.mimeType || '')) {
+          try {
+            const decoded = decodeBase64ToString(inl.data);
+            return JSON.parse(decoded);
+          } catch (e) {
+            console.warn('解析inlineData失败:', e);
+          }
+        }
+        // 一些模型可能把JSON字符串放在p.text
+        if (typeof p?.text === 'string') {
+          const trimmed = p.text.trim();
+          if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+            try { return JSON.parse(trimmed); } catch {}
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('extractInlineJSON 失败:', e);
+  }
+  return null;
+}
+
+function decodeBase64ToString(b64) {
+  try {
+    // 兼容非ASCII
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const decoder = new TextDecoder('utf-8');
+    return decoder.decode(bytes);
+  } catch (e) {
+    console.warn('decodeBase64ToString 失败，使用降级方案:', e);
+    return atob(b64);
+  }
+}
+
+function findSelectedPointsObject(obj) {
+  // 在任意嵌套层级查找包含 selectedPoints 的对象
+  if (!obj || typeof obj !== 'object') return null;
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const res = findSelectedPointsObject(item);
+      if (res) return res;
+    }
+    return null;
+  }
+  // 命中：包含 selectedPoints 数组，且元素有 x,y,z
+  if (Array.isArray(obj.selectedPoints) && obj.selectedPoints.some(isXYZPoint)) {
+    return {
+      selectedPoints: obj.selectedPoints.filter(isXYZPoint),
+      reasoning: typeof obj.reasoning === 'string' ? obj.reasoning : '',
+      pathType: typeof obj.pathType === 'string' ? obj.pathType : 'AI生成路径'
+    };
+  }
+  // 继续递归
+  for (const key of Object.keys(obj)) {
+    const val = obj[key];
+    const res = findSelectedPointsObject(val);
+    if (res) return res;
+  }
+  return null;
+}
+
+function isXYZPoint(p) {
+  return p && typeof p.x === 'number' && typeof p.y === 'number' && typeof p.z === 'number';
+}
+
+// 保存AI响应用于调试
+function saveAIResponseForDebug(rawResponse, parsedData) {
+	try {
+		const debugData = {
+			timestamp: new Date().toISOString(),
+			rawResponse: rawResponse,
+			parsedData: parsedData,
+			model: rawResponse.model || 'unknown'
+		};
+		
+		// 保存到全局变量供手动导出
+		lastAIResponse = debugData;
+		
+		// 自动下载调试文件
+		const blob = new Blob([JSON.stringify(debugData, null, 2)], { type: 'application/json' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = `ai_response_debug_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		URL.revokeObjectURL(url);
+		
+		console.log('AI响应调试文件已保存');
+	} catch (error) {
+		console.warn('保存AI响应调试文件失败:', error);
+	}
+}
+
+function setAIStatus(message, isError = false) {
+	aiStatusEl.textContent = message;
+	aiStatusEl.className = `text-xs ${isError ? 'text-red-300' : 'text-blue-300'}`;
+	aiStatusEl.classList.remove('hidden');
+}
+
+// 手动导出最后的AI响应
+function exportLastAIResponse() {
+	if (!lastAIResponse) {
+		setAIStatus('没有可导出的AI响应数据', true);
+		return;
+	}
+	
+	try {
+		const blob = new Blob([JSON.stringify(lastAIResponse, null, 2)], { type: 'application/json' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = `ai_response_manual_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		URL.revokeObjectURL(url);
+		
+		setAIStatus('AI响应已导出');
+	} catch (error) {
+		console.error('导出AI响应失败:', error);
+		setAIStatus('导出AI响应失败', true);
+	}
+}
+
+// Export contact points to JSON
+function exportContactPointsToJSON() {
+	if (contactPoints.length === 0) {
+		setAIStatus('没有接触点可导出', true);
+		return;
+	}
+	
+	const contactPointsData = {
+		contactPoints: contactPoints.map(point => ({
+			x: point.x,
+			y: point.y,
+			z: point.z
+		})),
+		referencePlane: null,
+		metadata: {
+			totalPoints: contactPoints.length,
+			exportTime: new Date().toISOString(),
+			description: "参考平面与牙模的接触点数据"
+		}
+	};
+	
+	// 如果有参考平面，添加参考平面数据
+	if (referencePlaneMesh && planeControlPoints.length === 3) {
+		contactPointsData.referencePlane = {
+			controlPoints: planeControlPoints.map(p => ({ 
+				x: p.position.x, 
+				y: p.position.y, 
+				z: p.position.z 
+			})),
+			normal: {
+				x: planeNormal.x,
+				y: planeNormal.y,
+				z: planeNormal.z
+			},
+			position: {
+				x: referencePlaneMesh.position.x,
+				y: referencePlaneMesh.position.y,
+				z: referencePlaneMesh.position.z
+			}
+		};
+	}
+	
+	// 创建下载链接
+	const a = document.createElement('a');
+	a.href = URL.createObjectURL(new Blob([JSON.stringify(contactPointsData, null, 2)], { type: 'application/json' }));
+	a.download = 'contact_points.json';
+	a.click();
+	URL.revokeObjectURL(a.href);
+	
+	setAIStatus(`已导出 ${contactPoints.length} 个接触点到 contact_points.json`);
+}
+
+// AI Path Generation
+async function generateAIPath() {
+	const apiKey = geminiApiKeyInput.value.trim();
+	if (!apiKey) {
+		setAIStatus('请输入Gemini API密钥', true);
+		return;
+	}
+	
+	if (contactPoints.length === 0) {
+		setAIStatus('没有接触点数据，请先确认参考平面', true);
+		return;
+	}
+	
+	// 准备接触点数据
+	const contactPointsData = {
+		contactPoints: contactPoints.map(point => ({
+			x: point.x,
+			y: point.y,
+			z: point.z
+		})),
+		totalPoints: contactPoints.length
+	};
+	
+	// 获取用户自定义prompt或使用默认prompt
+	const customPrompt = aiPromptInput.value.trim();
+	const defaultPrompt = `你是一个专业的牙科正畸专家，需要根据参考平面与牙模的接触点数据生成最优的唇弓路径。
+
+接触点数据：
+${JSON.stringify(contactPointsData, null, 2)}
+
+请分析这些接触点，并选择最合适的点来生成一条平滑、符合正畸学原理的唇弓路径。考虑以下因素：
+1. 接触点的分布和密度
+2. 唇弓的生理曲线特征
+3. 正畸治疗的最佳路径
+4. 避免过于尖锐的转折
+
+请返回一个JSON格式的响应，包含：
+{
+  "selectedPoints": [
+    {"x": 数值, "y": 数值, "z": 数值},
+    ...
+  ],
+  "reasoning": "选择这些点的理由说明",
+  "pathType": "路径类型描述（如：平滑曲线、抛物线等）"
+}
+
+请确保selectedPoints数组包含8-15个点，这些点应该能够形成一条平滑的唇弓路径。`;
+
+	const prompt = customPrompt || defaultPrompt;
+	
+	try {
+		setAIStatus('正在调用Gemini API生成路径...');
+		generateAiPathBtn.disabled = true;
+		
+		const response = await callGeminiAPI(apiKey, prompt, contactPointsData);
+		
+		// 解析AI响应
+		const aiResult = parseAIResponse(response);
+		
+		if (aiResult && aiResult.selectedPoints && aiResult.selectedPoints.length > 0) {
+			// 生成路径
+			generatePathFromAISelection(aiResult.selectedPoints);
+			setAIStatus(`AI已生成包含 ${aiResult.selectedPoints.length} 个点的路径。${aiResult.reasoning || ''}`);
+		} else {
+			throw new Error('AI返回的数据格式不正确');
+		}
+		
+	} catch (error) {
+		console.error('AI路径生成失败:', error);
+		setAIStatus(`AI路径生成失败: ${error.message}`, true);
+	} finally {
+		generateAiPathBtn.disabled = false;
+		updateAIModeButtons();
+	}
+}
+
+function parseAIResponse(response) {
+	try {
+		// 先尝试提取```json代码块
+		let jsonStr = '';
+		const fencedJson = response.match(/```json[\r\n]+([\s\S]*?)```/i);
+		if (fencedJson && fencedJson[1]) {
+			jsonStr = fencedJson[1].trim();
+		} else {
+			// 退化：寻找首个大括号包裹的对象（尽量非贪婪）
+			const braceMatch = response.match(/\{[\s\S]*\}/);
+			if (braceMatch) jsonStr = braceMatch[0];
+		}
+		if (jsonStr) {
+			const result = JSON.parse(jsonStr);
+			if (result.selectedPoints && Array.isArray(result.selectedPoints)) return result;
+		}
+		
+		// 如果无法解析JSON，尝试从文本中提取坐标
+		const coordinateMatches = response.match(/\{[^}]*"x"[^}]*\}/g);
+		if (coordinateMatches) {
+			const selectedPoints = coordinateMatches.map(match => {
+				try {
+					return JSON.parse(match);
+				} catch (e) {
+					return null;
+				}
+			}).filter(point => point && typeof point.x === 'number');
+			
+			if (selectedPoints.length > 0) {
+				return {
+					selectedPoints,
+					reasoning: "从AI响应中提取的坐标点",
+					pathType: "AI生成路径"
+				};
+			}
+		}
+		
+		throw new Error('无法从AI响应中提取有效的路径数据');
+	} catch (error) {
+		console.error('解析AI响应失败:', error);
+		throw new Error('AI响应格式错误，请检查prompt或重试');
+	}
+}
+
+function generatePathFromAISelection(selectedPoints) {
+	if (!selectedPoints || selectedPoints.length < 2) {
+		setAIStatus('AI选择的点数量不足', true);
+		return;
+	}
+	
+	// 将AI选择的点转换为THREE.Vector3对象
+	const aiPoints = selectedPoints.map(point => new THREE.Vector3(point.x, point.y, point.z));
+	
+	// 使用平滑曲线算法生成更多点
+	const smoothPoints = generateSmoothCurve(aiPoints);
+	
+	// 清除现有路径并设置新路径
+	saveState();
+	points = smoothPoints;
+	redrawScene();
+	
+	setStatus(`AI已生成包含 ${smoothPoints.length} 个点的平滑路径`);
 }
 
 function toggleDrawMode() {
@@ -548,6 +1039,29 @@ function enterParabolaMode() {
 function exitParabolaMode() {
 	isParabolaMode = false;
 	clearParabolaWorkingState();
+	updateModeButtons();
+}
+
+function enterAIGenerationMode() {
+	isAIGenerationMode = true;
+	isDrawingMode = false;
+	isEditMode = false;
+	isContactPointsMode = false;
+	isParabolaMode = false;
+	// 显示AI模式UI
+	aiModeUI.classList.remove('hidden');
+	// 计算并显示接触点
+	calculateContactPoints();
+	updateModeButtons();
+	updateAIModeButtons();
+}
+
+function exitAIGenerationMode() {
+	isAIGenerationMode = false;
+	// 隐藏AI模式UI
+	aiModeUI.classList.add('hidden');
+	// 清除接触点
+	clearContactPoints();
 	updateModeButtons();
 }
 
@@ -1853,7 +2367,13 @@ function wireEvents() {
 		} else if (mode === 'parabola') {
 			if (isContactPointsMode) toggleContactPointsMode();
 			if (isHyperbolaMode) exitHyperbolaMode();
+			if (isAIGenerationMode) exitAIGenerationMode();
 			enterParabolaMode();
+		} else if (mode === 'ai-generation') {
+			if (isContactPointsMode) toggleContactPointsMode();
+			if (isHyperbolaMode) exitHyperbolaMode();
+			if (isParabolaMode) exitParabolaMode();
+			enterAIGenerationMode();
 		} else {
 			if (isContactPointsMode) {
 				toggleContactPointsMode(); // 退出接触点模式
@@ -1863,6 +2383,9 @@ function wireEvents() {
 			}
 			if (isParabolaMode) {
 				exitParabolaMode();
+			}
+			if (isAIGenerationMode) {
+				exitAIGenerationMode();
 			}
 			updateArchCurve();
 		}
@@ -1875,6 +2398,16 @@ function wireEvents() {
 	openSettingsBtn.addEventListener('click', showSettingsModal);
 	cancelSettingsBtn.addEventListener('click', hideSettingsModal);
 	saveSettingsBtn.addEventListener('click', saveSettings);
+	
+	// AI Mode event listeners
+	generateAiPathBtn.addEventListener('click', generateAIPath);
+	exportContactPointsBtn.addEventListener('click', exportContactPointsToJSON);
+	exportAiResponseBtn.addEventListener('click', exportLastAIResponse);
+	geminiApiKeyInput.addEventListener('input', updateAIModeButtons);
+	aiPromptInput.addEventListener('input', () => {
+		// 可以在这里添加实时验证或其他逻辑
+	});
+	
 	// Design UI locked until plane confirmed
 	disableDesignUI(true);
 }

@@ -58,10 +58,34 @@
                         <option value="smooth">自由绘制（平滑）</option>
                         <option value="contact-points">接触点模式</option>
                         <option value="parabola">抛物线模式</option>
+                        <option value="ai-generation">AI生成路径</option>
                     </select>
                 </div>
-                <p class="text-[11px] text-gray-400 mb-1">提示：编辑模式下按Shift并单击点可选择三个端点（起点、底部端点、终点）用于生成U型曲。接触点模式下可选择两个接触点生成路径。抛物线模式下点击选择3个点生成一条抛物线路径。</p>
+                <p class="text-[11px] text-gray-400 mb-1">提示：编辑模式下按Shift并单击点可选择三个端点（起点、底部端点、终点）用于生成U型曲。接触点模式下可选择两个接触点生成路径。抛物线模式下点击选择3个点生成一条抛物线路径。AI生成模式下将自动分析接触点并生成最优路径。</p>
                 <p id="status" class="text-xs text-gray-300 h-5 mb-2">请选择操作模式。</p>
+                
+                <!-- AI Generation Mode UI -->
+                <div id="ai-mode-ui" class="hidden border border-blue-500 rounded-lg p-3 bg-blue-900/20">
+                    <h3 class="text-sm font-semibold text-blue-300 mb-2">AI生成路径设置</h3>
+                    <div class="space-y-2">
+                        <div>
+                            <label class="block text-xs text-gray-300 mb-1">Gemini API密钥</label>
+                            <input type="password" id="gemini-api-key" placeholder="输入您的Gemini API密钥" class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-300 mb-1">自定义Prompt（可选）</label>
+                            <textarea id="ai-prompt" rows="3" placeholder="使用默认prompt或输入自定义指令..." class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"></textarea>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button id="generate-ai-path" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-3 rounded text-xs disabled:opacity-50" disabled>生成AI路径</button>
+                            <button id="export-contact-points" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-3 rounded text-xs disabled:opacity-50" disabled>导出接触点</button>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button id="export-ai-response" class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-3 rounded text-xs disabled:opacity-50" disabled>导出AI响应</button>
+                        </div>
+                        <div id="ai-status" class="text-xs text-blue-300 hidden"></div>
+                    </div>
+                </div>
                 <div class="grid grid-cols-2 gap-2">
                     <button id="toggle-draw" class="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>开始绘制</button>
                     <button id="toggle-edit" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>编辑点</button>
