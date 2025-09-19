@@ -23,11 +23,16 @@ let isDrawingMode = false; // 绘制模式
 let isEditMode = false; // 编辑模式
 let isContactPointsMode = false; // 接触点模式
 let isParabolaMode = false; // 抛物线模式
+let isMultiSelectMode = false; // 多选模式
 
 // U型曲选择相关
 const SELECTION_COLOR_ULOOP = 0x9932CC; // U型曲选择颜色（紫色）
 const SELECTION_COLOR_ULOOP_MIDDLE = 0xFFA500; // 中间点颜色（橙色）
 let uLoopSelectionIndices = []; // U型曲选择索引数组
+
+// 多选模式相关
+const MULTI_SELECT_COLOR = 0xFFD700; // 多选点颜色（金色）
+let multiSelectedIndices = []; // 多选点索引数组
 
 // 接触点模式
 let contactPoints = []; // 接触点数组
@@ -59,6 +64,7 @@ const togglePlaneVisibilityBtn = document.getElementById('toggle-plane-visibilit
 const designModeSelect = document.getElementById('design-mode'); // 设计模式选择
 const toggleDrawBtn = document.getElementById('toggle-draw'); // 切换绘制按钮
 const toggleEditBtn = document.getElementById('toggle-edit'); // 切换编辑按钮
+const toggleMultiSelectBtn = document.getElementById('toggle-multi-select'); // 切换多选按钮
 const clearAllBtn = document.getElementById('clear-all'); // 清除全部按钮
 const generateUloopBtn = document.getElementById('generate-uloop'); // 生成U型曲按钮
 const undoBtn = document.getElementById('undo'); // 撤销按钮
@@ -540,6 +546,7 @@ function disableDesignUI(disabled) {
 	designModeSelect.disabled = disabled;
 	toggleDrawBtn.disabled = disabled;
 	toggleEditBtn.disabled = disabled;
+	toggleMultiSelectBtn.disabled = disabled;
 	clearAllBtn.disabled = disabled;
 	generateUloopBtn.disabled = true;
 	undoBtn.disabled = historyStack.length === 0;
@@ -560,13 +567,19 @@ function updateModeButtons() {
 	if (isEditMode) {
 		setStatus('编辑模式：拖动点修改路径。按住Shift单击选择三个端点。');
 	}
+	if (isMultiSelectMode) {
+		toggleMultiSelectBtn.textContent = '退出多选';
+		setStatus('多选模式：点击选择点，选择两个点后它们之间的所有点都会自动选中，然后拖拽移动。');
+	} else {
+		toggleMultiSelectBtn.textContent = '多选模式';
+	}
 	if (isContactPointsMode) {
 		setStatus('接触点模式：单击接触点选择起点和终点。');
 	}
 	if (isParabolaMode) {
 		setStatus('抛物线模式：在牙模上点击选择3个点进行拟合。');
 	}
-	if (!isDrawingMode && !isEditMode && !isPlaneMode && !isContactPointsMode) {
+	if (!isDrawingMode && !isEditMode && !isPlaneMode && !isContactPointsMode && !isMultiSelectMode) {
 		setStatus('请选择操作模式。');
 	}
 }
@@ -577,8 +590,12 @@ function updateModeButtons() {
  */
 function toggleDrawMode() {
 	isDrawingMode = !isDrawingMode;
-	if (isDrawingMode) isEditMode = false;
+	if (isDrawingMode) {
+		isEditMode = false;
+		isMultiSelectMode = false;
+	}
 	deselectAllPoints();
+	clearMultiSelection();
 	updateModeButtons();
 }
 
@@ -588,7 +605,27 @@ function toggleDrawMode() {
  */
 function toggleEditMode() {
 	isEditMode = !isEditMode;
-	if (isEditMode) isDrawingMode = false;
+	if (isEditMode) {
+		isDrawingMode = false;
+		isMultiSelectMode = false;
+	}
+	clearMultiSelection();
+	updateModeButtons();
+}
+
+/**
+ * 切换多选模式
+ * 开启或关闭多选模式
+ */
+function toggleMultiSelectMode() {
+	isMultiSelectMode = !isMultiSelectMode;
+	if (isMultiSelectMode) {
+		isDrawingMode = false;
+		isEditMode = false;
+		// 清除其他模式的选择
+		deselectAllPoints();
+		clearMultiSelection();
+	}
 	updateModeButtons();
 }
 
@@ -601,12 +638,14 @@ function toggleContactPointsMode() {
 	if (isContactPointsMode) {
 		isDrawingMode = false;
 		isEditMode = false;
+		isMultiSelectMode = false;
 		// 计算并显示接触点
 		calculateContactPoints();
 	} else {
 		// 清除接触点
 		clearContactPoints();
 	}
+	clearMultiSelection();
 	updateModeButtons();
 }
 
@@ -619,8 +658,10 @@ function enterParabolaMode() {
 	isParabolaMode = true;
 	isDrawingMode = false;
 	isEditMode = false;
+	isMultiSelectMode = false;
 	// 清理旧状态
 	clearParabolaWorkingState();
+	clearMultiSelection();
 	updateModeButtons();
 }
 
@@ -640,6 +681,7 @@ function exitParabolaMode() {
  */
 function clearDrawing() {
 	deselectAllPoints();
+	clearMultiSelection();
 	points = [];
 	pointMarkers.forEach(m => scene.remove(m));
 	pointMarkers = [];
@@ -728,9 +770,18 @@ function redrawScene() {
  */
 function addPointMarker(position, index) {
 	const isULoopInternal = position.userData && position.userData.isULoopInternal;
-	const isSelected = uLoopSelectionIndices.includes(index);
+	const isULoopSelected = uLoopSelectionIndices.includes(index);
+	const isMultiSelected = multiSelectedIndices.includes(index);
+	
+	let color = 0xff0000; // 默认红色
+	if (isULoopSelected) {
+		color = SELECTION_COLOR_ULOOP;
+	} else if (isMultiSelected) {
+		color = MULTI_SELECT_COLOR;
+	}
+	
 	const markerGeometry = new THREE.SphereGeometry(markerRadius, 16, 16);
-	const markerMaterial = new THREE.MeshBasicMaterial({ color: isSelected ? SELECTION_COLOR_ULOOP : 0xff0000 });
+	const markerMaterial = new THREE.MeshBasicMaterial({ color });
 	const marker = new THREE.Mesh(markerGeometry, markerMaterial);
 	marker.position.copy(position);
 	marker.userData = { ...(position.userData || {}), index };
@@ -754,15 +805,26 @@ function setupPointDragControls() {
 	dragControls.addEventListener('drag', (event) => {
 		const idx = event.object.userData.index;
 		if (typeof idx === 'number') {
-			points[idx].copy(event.object.position);
-			updateArchCurve();
+			// 如果是多选模式且拖拽的是选中的点，移动所有选中的点
+			if (isMultiSelectMode && multiSelectedIndices.includes(idx)) {
+				const delta = new THREE.Vector3().subVectors(event.object.position, points[idx]);
+				moveSelectedPoints(delta);
+			} else {
+				// 普通拖拽
+				points[idx].copy(event.object.position);
+				updateArchCurve();
+			}
 		}
 	});
 	dragControls.addEventListener('dragend', (event) => {
 		controls.enabled = true;
 		const idx = event.object.userData.index;
+		
+		// 更新颜色
 		if (uLoopSelectionIndices.includes(idx)) {
 			event.object.material.color.set(SELECTION_COLOR_ULOOP);
+		} else if (multiSelectedIndices.includes(idx)) {
+			event.object.material.color.set(MULTI_SELECT_COLOR);
 		} else {
 			event.object.material.color.set(0xff0000);
 		}
@@ -928,6 +990,7 @@ function importJSONFile(file) {
  */
 function onCanvasMouseDown(event) {
 	if (event.button !== 0) return;
+	
 	// 编辑模式下使用Shift进行选择
 	if (isEditMode && event.shiftKey) {
 		raycaster.setFromCamera(mouse, camera);
@@ -940,6 +1003,20 @@ function onCanvasMouseDown(event) {
 		event.stopImmediatePropagation();
 		return;
 	}
+	
+	// 多选模式下的处理
+	if (isMultiSelectMode) {
+		raycaster.setFromCamera(mouse, camera);
+		const intersects = raycaster.intersectObjects(draggableObjects);
+		
+		if (intersects.length > 0) {
+			// 点击了点标记
+			handleMultiSelect(intersects[0].object);
+		}
+		event.stopImmediatePropagation();
+		return;
+	}
+	
 	isDraggingView = false;
 	mouseDownPos.set(event.clientX, event.clientY);
 }
@@ -951,6 +1028,7 @@ function onCanvasMouseDown(event) {
 function onCanvasMouseMove(event) {
 	mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
 	mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+	
 	if (event.buttons !== 1) return;
 	if (mouseDownPos.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 5) {
 		isDraggingView = true;
@@ -1422,6 +1500,115 @@ function deselectAllPoints() {
 }
 
 /**
+ * 清除多选状态
+ * 清除多选点选择状态
+ */
+function clearMultiSelection() {
+	multiSelectedIndices.forEach(i => {
+		const marker = draggableObjects.find(m => m.userData.index === i);
+		if (marker) marker.material.color.set(0xff0000);
+	});
+	multiSelectedIndices = [];
+}
+
+/**
+ * 处理多选点选择
+ * @param {Object} marker - 标记对象
+ */
+function handleMultiSelect(marker) {
+	const index = marker.userData.index;
+	const selectionIndex = multiSelectedIndices.indexOf(index);
+	
+	if (selectionIndex > -1) {
+		// 取消选择
+		multiSelectedIndices.splice(selectionIndex, 1);
+		marker.material.color.set(0xff0000);
+	} else {
+		// 选择点
+		multiSelectedIndices.push(index);
+		marker.material.color.set(MULTI_SELECT_COLOR);
+		
+		// 如果选择了两个或更多点，选择它们之间的所有点
+		if (multiSelectedIndices.length >= 2) {
+			selectPointsBetweenSelected();
+		}
+	}
+	
+	setStatus(`多选模式：已选择 ${multiSelectedIndices.length} 个点`);
+}
+
+/**
+ * 选择已选中点之间的所有点
+ */
+function selectPointsBetweenSelected() {
+	if (multiSelectedIndices.length < 2) return;
+	
+	// 找到最小和最大索引
+	const minIndex = Math.min(...multiSelectedIndices);
+	const maxIndex = Math.max(...multiSelectedIndices);
+	
+	// 选择中间的所有点
+	for (let i = minIndex; i <= maxIndex; i++) {
+		if (!multiSelectedIndices.includes(i)) {
+			multiSelectedIndices.push(i);
+		}
+	}
+	
+	// 更新所有标记的颜色
+	updateMultiSelectColors();
+}
+
+
+/**
+ * 更新多选点颜色
+ */
+function updateMultiSelectColors() {
+	draggableObjects.forEach(marker => {
+		const index = marker.userData.index;
+		if (typeof index !== 'number') return;
+		
+		if (multiSelectedIndices.includes(index)) {
+			marker.material.color.set(MULTI_SELECT_COLOR);
+		} else if (uLoopSelectionIndices.includes(index)) {
+			marker.material.color.set(SELECTION_COLOR_ULOOP);
+		} else {
+			marker.material.color.set(0xff0000);
+		}
+	});
+}
+
+
+/**
+ * 移动选中的点
+ * @param {THREE.Vector3} delta - 移动增量
+ */
+function moveSelectedPoints(delta) {
+	if (multiSelectedIndices.length === 0) return;
+	
+	// 保存状态
+	saveState();
+	
+	// 移动所有选中的点
+	multiSelectedIndices.forEach(index => {
+		if (points[index]) {
+			points[index].add(delta);
+		}
+	});
+	
+	// 更新标记位置
+	multiSelectedIndices.forEach(index => {
+		const marker = draggableObjects.find(m => m.userData.index === index);
+		if (marker && points[index]) {
+			marker.position.copy(points[index]);
+		}
+	});
+	
+	// 更新曲线
+	updateArchCurve();
+}
+
+
+/**
  * 从选择生成U型曲
  * 根据选中的三个点生成U型曲
  */
@@ -1684,6 +1871,7 @@ function wireEvents() {
 	});
 	toggleDrawBtn.addEventListener('click', () => toggleDrawMode());
 	toggleEditBtn.addEventListener('click', () => toggleEditMode());
+	toggleMultiSelectBtn.addEventListener('click', () => toggleMultiSelectMode());
 	clearAllBtn.addEventListener('click', () => { saveStateIfPoints(); clearDrawing(); });
 	generateUloopBtn.addEventListener('click', () => generateULoopFromSelection());
 	undoBtn.addEventListener('click', () => undo());
