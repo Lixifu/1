@@ -118,11 +118,34 @@ function initScene() {
 	renderer.setPixelRatio(window.devicePixelRatio);
 	renderer.setSize(window.innerWidth, window.innerHeight);
 
-	const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+	// 环境光 - 提供基础照明
+	const ambient = new THREE.AmbientLight(0xffffff, 0.4);
 	scene.add(ambient);
-	const dir = new THREE.DirectionalLight(0xffffff, 1.2);
-	dir.position.set(50, 60, 120);
-	scene.add(dir);
+	
+	// 主方向光 - 从右前方照射
+	const mainDir = new THREE.DirectionalLight(0xffffff, 0.8);
+	mainDir.position.set(50, 60, 120);
+	scene.add(mainDir);
+	
+	// 补充方向光1 - 从左前方照射
+	const dir1 = new THREE.DirectionalLight(0xffffff, 0.6);
+	dir1.position.set(-50, 40, 100);
+	scene.add(dir1);
+	
+	// 补充方向光2 - 从后方照射
+	const dir2 = new THREE.DirectionalLight(0xffffff, 0.4);
+	dir2.position.set(0, 30, -100);
+	scene.add(dir2);
+	
+	// 补充方向光3 - 从上方照射
+	const dir3 = new THREE.DirectionalLight(0xffffff, 0.5);
+	dir3.position.set(0, 100, 0);
+	scene.add(dir3);
+	
+	// 补充方向光4 - 从下方照射
+	const dir4 = new THREE.DirectionalLight(0xffffff, 0.3);
+	dir4.position.set(0, -80, 0);
+	scene.add(dir4);
 
 	controls = new OrbitControls(camera, renderer.domElement);
 	controls.enableDamping = false;
