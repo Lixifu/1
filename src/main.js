@@ -365,10 +365,6 @@ function calculateContactPoints() {
 	
 	setStatus(`找到 ${contactPoints.length} 个接触点`);
 	
-	// 如果当前是AI模式，更新AI模式按钮状态
-	if (isAIGenerationMode) {
-		updateAIModeButtons();
-	}
 }
 
 /**
@@ -1866,20 +1862,12 @@ function wireEvents() {
 		} else if (mode === 'parabola') {
 			if (isContactPointsMode) toggleContactPointsMode();
 			enterParabolaMode();
-		} else if (mode === 'ai-generation') {
-			if (isContactPointsMode) toggleContactPointsMode();
-			if (isHyperbolaMode) exitHyperbolaMode();
-			if (isParabolaMode) exitParabolaMode();
-			enterAIGenerationMode();
 		} else {
 			if (isContactPointsMode) {
 				toggleContactPointsMode(); // 退出接触点模式
 			}
 			if (isParabolaMode) {
 				exitParabolaMode();
-			}
-			if (isAIGenerationMode) {
-				exitAIGenerationMode();
 			}
 			updateArchCurve();
 		}
