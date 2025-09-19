@@ -22,7 +22,6 @@ let isPlaneMode = false; // 平面模式
 let isDrawingMode = false; // 绘制模式
 let isEditMode = false; // 编辑模式
 let isContactPointsMode = false; // 接触点模式
-let isHyperbolaMode = false; // 双曲线模式（已废弃，不再从UI进入）
 let isParabolaMode = false; // 抛物线模式
 
 // U型曲选择相关
@@ -37,11 +36,6 @@ let selectedContactPoints = []; // 选中的接触点数组
 const CONTACT_POINT_COLOR = 0x00FF00; // 接触点颜色（绿色）
 const SELECTED_CONTACT_POINT_COLOR = 0xFF6600; // 选中接触点颜色（橙色）
 
-// 双曲线模式状态（为向后兼容保留，UI不再使用）
-let hyperbolaSelectedContactPoints = []; // 双曲线选中的接触点
-let hyperbolaShortCurvePoints = []; // 双曲线短曲线点
-let hyperbolaGuideLine = null; // 双曲线引导线
-const HYPERBOLA_SAMPLE_COLOR = 0x00BFFF; // 双曲线采样颜色（已不再使用手动采样标记，保留颜色常量）
 
 // 抛物线模式状态
 let parabolaPickedPoints = []; // 抛物线拾取的点
@@ -572,7 +566,7 @@ function updateModeButtons() {
 	if (isParabolaMode) {
 		setStatus('抛物线模式：在牙模上点击选择3个点进行拟合。');
 	}
-	if (!isDrawingMode && !isEditMode && !isPlaneMode && !isContactPointsMode && !isHyperbolaMode) {
+	if (!isDrawingMode && !isEditMode && !isPlaneMode && !isContactPointsMode) {
 		setStatus('请选择操作模式。');
 	}
 }
@@ -616,31 +610,6 @@ function toggleContactPointsMode() {
 	updateModeButtons();
 }
 
-/**
- * 进入双曲线模式
- * 清理状态并计算接触点
- */
-function enterHyperbolaMode() {
-	isHyperbolaMode = true;
-	isDrawingMode = false;
-	isEditMode = false;
-	// 进入前清理上一次状态
-	clearHyperbolaWorkingState();
-	// 复用接触点检测与显示
-	calculateContactPoints();
-	updateModeButtons();
-}
-
-/**
- * 退出双曲线模式
- * 清理双曲线工作状态和接触点
- */
-function exitHyperbolaMode() {
-	isHyperbolaMode = false;
-	clearHyperbolaWorkingState();
-	clearContactPoints();
-	updateModeButtons();
-}
 
 /**
  * 进入抛物线模式
@@ -687,8 +656,6 @@ function clearDrawing() {
 	}
 	// 清除接触点
 	clearContactPoints();
-	// 清除双曲线工作态
-	clearHyperbolaWorkingState();
 	updateExportAvailability();
 }
 
@@ -1010,9 +977,6 @@ function onCanvasMouseUp(event) {
 	if (isContactPointsMode) {
 		handleContactPointSelection();
 	}
-	if (isHyperbolaMode) {
-		handleHyperbolaMouseUp();
-	}
 	if (isParabolaMode) {
 		handleParabolaMouseUp();
 	}
@@ -1058,55 +1022,7 @@ function handleContactPointSelection() {
 	}
 }
 
-/**
- * 处理双曲线模式鼠标抬起事件
- * 选择接触点并生成双曲线路径
- */
-function handleHyperbolaMouseUp() {
-	raycaster.setFromCamera(mouse, camera);
-	// 阶段1：选择两个接触点
-	if (hyperbolaSelectedContactPoints.length < 2) {
-		const intersects = raycaster.intersectObjects(contactPointMarkers);
-		if (intersects.length === 0) return;
-		const marker = intersects[0].object;
-		const index = marker.userData.index;
-		// 切换选择
-		const exists = hyperbolaSelectedContactPoints.includes(index);
-		if (exists) {
-			hyperbolaSelectedContactPoints = hyperbolaSelectedContactPoints.filter(i => i !== index);
-			marker.material.color.set(CONTACT_POINT_COLOR);
-			setStatus(`双曲线：已取消接触点 ${index + 1}，当前选择：${hyperbolaSelectedContactPoints.length}/2`);
-			return;
-		}
-		if (hyperbolaSelectedContactPoints.length >= 2) {
-			resetHyperbolaContactSelectionColors();
-			hyperbolaSelectedContactPoints = [];
-		}
-		hyperbolaSelectedContactPoints.push(index);
-		marker.material.color.set(SELECTED_CONTACT_POINT_COLOR);
-		setStatus(`双曲线：已选择接触点 ${index + 1}，当前选择：${hyperbolaSelectedContactPoints.length}/2`);
-		if (hyperbolaSelectedContactPoints.length === 2) {
-			prepareHyperbolaShortCurve();
-			generateHyperbolaPath();
-		}
-	}
-}
 
-/**
- * 清除双曲线工作状态
- * 清理双曲线相关的所有状态和对象
- */
-function clearHyperbolaWorkingState() {
-	resetHyperbolaContactSelectionColors();
-	hyperbolaSelectedContactPoints = [];
-	hyperbolaShortCurvePoints = [];
-	if (hyperbolaGuideLine) {
-		scene.remove(hyperbolaGuideLine);
-		hyperbolaGuideLine.geometry?.dispose?.();
-		hyperbolaGuideLine.material?.dispose?.();
-		hyperbolaGuideLine = null;
-	}
-}
 
 /**
  * 清除抛物线工作状态
@@ -1118,76 +1034,8 @@ function clearParabolaWorkingState() {
 	parabolaMarkers = [];
 }
 
-/**
- * 重置双曲线接触点选择颜色
- * 将所有接触点标记恢复为默认颜色
- */
-function resetHyperbolaContactSelectionColors() {
-	if (!contactPointMarkers.length) return;
-	contactPointMarkers.forEach(m => m.material.color.set(CONTACT_POINT_COLOR));
-}
 
-/**
- * 准备双曲线短曲线
- * 根据选中的接触点生成短曲线并显示引导线
- */
-function prepareHyperbolaShortCurve() {
-	const startIndex = hyperbolaSelectedContactPoints[0];
-	const endIndex = hyperbolaSelectedContactPoints[1];
-	const pathPoints = getCurvePointsBetweenIndices(contactPoints, startIndex, endIndex);
-	hyperbolaShortCurvePoints = pathPoints.map(p => p.clone());
-	// 显示引导线
-	if (hyperbolaGuideLine) {
-		scene.remove(hyperbolaGuideLine);
-		hyperbolaGuideLine.geometry?.dispose?.();
-		hyperbolaGuideLine.material?.dispose?.();
-		hyperbolaGuideLine = null;
-	}
-	const g = new THREE.BufferGeometry().setFromPoints(hyperbolaShortCurvePoints);
-	const m = new THREE.LineBasicMaterial({ color: 0x00aaff });
-	hyperbolaGuideLine = new THREE.Line(g, m);
-	scene.add(hyperbolaGuideLine);
-}
 
-/**
- * 生成双曲线路径
- * 使用双曲线拟合算法生成路径
- */
-function generateHyperbolaPath() {
-	if (hyperbolaSelectedContactPoints.length !== 2 || hyperbolaShortCurvePoints.length < 2) return;
-	// 自动从短曲线上选取3个中间采样点（按弧长25%、50%、75%）
-	const autoMid = pickAutoThreeSamples(hyperbolaShortCurvePoints);
-	// 构造用于拟合的平面：用端点和中间点近似最佳平面
-	const plane = estimateBestFitPlane([hyperbolaShortCurvePoints[0], ...autoMid, hyperbolaShortCurvePoints[hyperbolaShortCurvePoints.length - 1]]);
-	const basis = buildPlaneBasis(plane.normal);
-	const centroid = plane.point;
-	const end1 = toPlane2D(hyperbolaShortCurvePoints[0], centroid, basis.u, basis.v);
-	const end2 = toPlane2D(hyperbolaShortCurvePoints[hyperbolaShortCurvePoints.length - 1], centroid, basis.u, basis.v);
-	const mids2 = autoMid.map(p => toPlane2D(p, centroid, basis.u, basis.v));
-	// 约束拟合：必须通过两个端点；最小二乘拟合中间三个
-	const conic = fitConicConstrainedThrough(end1, end2, mids2);
-	let generated2D = [];
-	if (conic && isHyperbolaConic(conic)) {
-		generated2D = sampleHyperbolaConicConstrained(conic, end1, end2, mids2, smoothPointsCount);
-	} else {
-		// 退化：用短曲线的点进行平滑插值
-		const crv = new THREE.CatmullRomCurve3(hyperbolaShortCurvePoints, false, 'catmullrom', 0.5);
-		const arr = crv.getPoints(smoothPointsCount);
-		saveState();
-		points = arr;
-		redrawScene();
-		setStatus('双曲线拟合失败，已使用平滑曲线替代。');
-		return;
-	}
-	// 映射回3D
-	const generated3D = generated2D.map(p2 => fromPlane2D(p2, centroid, basis.u, basis.v));
-	saveState();
-	points = generated3D;
-	redrawScene();
-	setStatus('双曲线路径已生成（通过两端点，拟合中间三点）。');
-	// 退出/清理工作态但保留模式方便再次生成
-	clearHyperbolaWorkingState();
-}
 
 /**
  * 处理抛物线模式鼠标抬起事件
@@ -1340,471 +1188,24 @@ function inv3(m) {
 	return inv;
 }
 
-/**
- * 估计最佳拟合平面
- * @param {Array} pts - 点数组
- * @returns {Object} 平面对象，包含点和法向量
- */
-function estimateBestFitPlane(pts) {
-	// 质心
-	const c = new THREE.Vector3();
-	pts.forEach(p => c.add(p));
-	c.divideScalar(pts.length);
-	// 协方差矩阵
-	let xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
-	for (const p of pts) {
-		const dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
-		xx += dx * dx; xy += dx * dy; xz += dx * dz;
-		yy += dy * dy; yz += dy * dz; zz += dz * dz;
-	}
-	const cov = [
-		[xx, xy, xz],
-		[xy, yy, yz],
-		[xz, yz, zz]
-	];
-	const normal = smallestEigenVector3(cov);
-	return { point: c, normal };
-}
 
-/**
- * 构建平面基向量
- * @param {THREE.Vector3} normal - 平面法向量
- * @returns {Object} 基向量对象
- */
-function buildPlaneBasis(normal) {
-	const n = normal.clone().normalize();
-	const tmp = Math.abs(n.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
-	const u = new THREE.Vector3().crossVectors(tmp, n).normalize();
-	const v = new THREE.Vector3().crossVectors(n, u).normalize();
-	return { u, v, n };
-}
 
-/**
- * 将3D点投影到2D平面
- * @param {THREE.Vector3} p - 3D点
- * @param {THREE.Vector3} origin - 平面原点
- * @param {THREE.Vector3} u - U轴向量
- * @param {THREE.Vector3} v - V轴向量
- * @returns {Object} 2D坐标
- */
-function toPlane2D(p, origin, u, v) {
-	const d = new THREE.Vector3().subVectors(p, origin);
-	return { x: d.dot(u), y: d.dot(v) };
-}
 
-/**
- * 将2D点映射回3D空间
- * @param {Object} p2 - 2D点
- * @param {THREE.Vector3} origin - 平面原点
- * @param {THREE.Vector3} u - U轴向量
- * @param {THREE.Vector3} v - V轴向量
- * @returns {THREE.Vector3} 3D点
- */
-function fromPlane2D(p2, origin, u, v) {
-	return new THREE.Vector3().copy(origin).add(u.clone().multiplyScalar(p2.x)).add(v.clone().multiplyScalar(p2.y));
-}
 
-/**
- * 射线与点平面相交
- * @param {Array} pts - 点数组
- * @returns {THREE.Vector3|null} 相交点或null
- */
-function intersectRayWithPlaneOfPoints(pts) {
-	if (pts.length < 3) return null;
-	const plane = estimateBestFitPlane(pts);
-	const n = plane.normal.clone().normalize();
-	const p0 = plane.point.clone();
-	raycaster.setFromCamera(mouse, camera);
-	const rOrigin = raycaster.ray.origin.clone();
-	const rDir = raycaster.ray.direction.clone();
-	const denom = n.dot(rDir);
-	if (Math.abs(denom) < 1e-6) return null;
-	const t = n.dot(p0.clone().sub(rOrigin)) / denom;
-	if (t < 0) return null;
-	return rOrigin.add(rDir.multiplyScalar(t));
-}
 
-/**
- * 将点投影到折线上
- * @param {THREE.Vector3} p - 要投影的点
- * @param {Array} poly - 折线点数组
- * @returns {THREE.Vector3|null} 投影点或null
- */
-function projectPointToPolyline(p, poly) {
-	if (poly.length < 2) return null;
-	let best = null;
-	let bestDist2 = Infinity;
-	for (let i = 0; i < poly.length - 1; i++) {
-		const a = poly[i];
-		const b = poly[i + 1];
-		const ab = new THREE.Vector3().subVectors(b, a);
-		const ap = new THREE.Vector3().subVectors(p, a);
-		const t = Math.max(0, Math.min(1, ap.dot(ab) / ab.lengthSq()));
-		const q = a.clone().add(ab.multiplyScalar(t));
-		const d2 = q.distanceToSquared(p);
-		if (d2 < bestDist2) { bestDist2 = d2; best = q; }
-	}
-	return best;
-}
 
-/**
- * 计算3x3对称矩阵的最小特征向量
- * @param {Array} m - 3x3对称矩阵
- * @returns {THREE.Vector3} 最小特征向量
- */
-function smallestEigenVector3(m) {
-	// 使用Jacobi算法计算3x3对称矩阵的特征向量
-	// 使用简单的Jacobi特征值算法
-	let a11 = m[0][0], a12 = m[0][1], a13 = m[0][2];
-	let a22 = m[1][1], a23 = m[1][2];
-	let a33 = m[2][2];
-	let v = [1, 0, 0], w = [0, 1, 0], u = [0, 0, 1];
-	function rotate(p, q, angle) {
-		const c = Math.cos(angle), s = Math.sin(angle);
-		for (const vec of [v, w, u]) {
-			const ip = vec[p], iq = vec[q];
-			vec[p] = c * ip - s * iq;
-			vec[q] = s * ip + c * iq;
-		}
-	}
-	for (let k = 0; k < 10; k++) {
-		// 找到最大的非对角元素
-		let p = 0, q = 1, max = Math.abs(a12);
-		if (Math.abs(a13) > max) { max = Math.abs(a13); p = 0; q = 2; }
-		if (Math.abs(a23) > max) { max = Math.abs(a23); p = 1; q = 2; }
-		if (max < 1e-9) break;
-		let app, aqq, apq;
-		if (p === 0 && q === 1) { app = a11; aqq = a22; apq = a12; }
-		if (p === 0 && q === 2) { app = a11; aqq = a33; apq = a13; }
-		if (p === 1 && q === 2) { app = a22; aqq = a33; apq = a23; }
-		const phi = 0.5 * Math.atan2(2 * apq, (aqq - app));
-		rotate(p, q, phi);
-		// 近似更新矩阵元素（不需要最终特征向量方向质量）
-		const c = Math.cos(phi), s = Math.sin(phi);
-		function rot(a, b, cval, sval) { const t = cval * a - sval * b; return { x: t, y: sval * a + cval * b }; }
-		if (p === 0 && q === 1) {
-			const r1 = rot(a11, a12, c, s); const r2 = rot(a12, a22, c, s);
-			a11 = r1.x; a12 = r1.y; a22 = r2.y;
-			const r13 = rot(a13, a23, c, s); a13 = r13.x; a23 = r13.y;
-		}
-		if (p === 0 && q === 2) {
-			const r1 = rot(a11, a13, c, s); const r2 = rot(a13, a33, c, s);
-			a11 = r1.x; a13 = r1.y; a33 = r2.y;
-			const r12 = rot(a12, a23, c, s); a12 = r12.x; a23 = r12.y;
-		}
-		if (p === 1 && q === 2) {
-			const r1 = rot(a22, a23, c, s); const r2 = rot(a23, a33, c, s);
-			a22 = r1.x; a23 = r1.y; a33 = r2.y;
-			const r12 = rot(a12, a13, c, s); a12 = r12.x; a13 = r12.y;
-		}
-	}
-	// 最小特征向量近似为具有最小方差方向的列 -> 选择u,w,v最小？为简单起见，返回v和w的归一化叉积以确保大致正交
-	const ev = new THREE.Vector3(v[0], v[1], v[2]).normalize();
-	const ew = new THREE.Vector3(w[0], w[1], w[2]).normalize();
-	let n = new THREE.Vector3().crossVectors(ev, ew).normalize();
-	if (!Number.isFinite(n.x)) n = new THREE.Vector3(0, 0, 1);
-	return n;
-}
 
-/**
- * 拟合圆锥曲线
- * @param {Array} pts2 - 2D点数组
- * @returns {Object|null} 圆锥曲线参数或null
- */
-function fitConic(pts2) {
-	if (pts2.length < 5) return null;
-	// 构建设计矩阵D
-	const D = [];
-	for (const p of pts2) {
-		const x = p.x, y = p.y;
-		D.push([x * x, x * y, y * y, x, y, 1]);
-	}
-	const svd = svdDecompose(D);
-	if (!svd) return null;
-	const V = svd.V; // 列是右奇异向量
-	const p = V.map(row => row[5]); // 最后一列
-	return { a: p[0], b: p[1], c: p[2], d: p[3], e: p[4], f: p[5] };
-}
 
-/**
- * 判断是否为双曲线圆锥曲线
- * @param {Object} conic - 圆锥曲线参数
- * @returns {boolean} 是否为双曲线
- */
-function isHyperbolaConic(conic) {
-	const { a, b, c } = conic;
-	return (4 * a * c - b * b) < 0;
-}
 
-/**
- * 采样双曲线圆锥曲线
- * @param {Object} conic - 圆锥曲线参数
- * @param {Array} samplePts - 采样点数组
- * @param {number} count - 采样数量
- * @returns {Array} 采样结果
- */
-function sampleHyperbolaConic(conic, samplePts, count) {
-	// 在采样点的边界框内采样
-	let minX = Infinity, maxX = -Infinity;
-	for (const p of samplePts) { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; }
-	const xs = [];
-	for (let i = 0; i < count; i++) xs.push(minX + (maxX - minX) * (i / (count - 1)));
-	const res = [];
-	const { a, b, c, d, e, f } = conic;
-	for (const x of xs) {
-		// 求解y的二次方程：(c) y^2 + (b x + e) y + (a x^2 + d x + f) = 0
-		const qa = c;
-		const qb = b * x + e;
-		const qc = a * x * x + d * x + f;
-		const disc = qb * qb - 4 * qa * qc;
-		if (disc < 0) continue;
-		const sdisc = Math.sqrt(Math.max(0, disc));
-		const y1 = (-qb + sdisc) / (2 * qa);
-		const y2 = (-qb - sdisc) / (2 * qa);
-		// 选择更接近采样中位数的分支
-		const medianY = samplePts.map(p => p.y).sort((m, n) => m - n)[Math.floor(samplePts.length / 2)];
-		const y = Math.abs(y1 - medianY) < Math.abs(y2 - medianY) ? y1 : y2;
-		res.push({ x, y });
-	}
-	// 确保按x单调排序
-	res.sort((p, q) => p.x - q.x);
-	return res;
-}
 
-/**
- * 自动沿折线按累积弧长比例选择3个内部采样点
- * @param {Array} poly - 折线点数组
- * @returns {Array} 采样点数组
- */
-function pickAutoThreeSamples(poly) {
-	const ratios = [0.25, 0.5, 0.75];
-	const cum = [0];
-	let total = 0;
-	for (let i = 1; i < poly.length; i++) {
-		total += poly[i - 1].distanceTo(poly[i]);
-		cum.push(total);
-	}
-	if (total === 0) return [];
-	const res = [];
-	for (const r of ratios) {
-		const target = r * total;
-		// 定位线段
-		let j = 1; while (j < cum.length && cum[j] < target) j++;
-		if (j >= cum.length) { res.push(poly[poly.length - 1].clone()); continue; }
-		const segLen = cum[j] - cum[j - 1];
-		const t = segLen > 0 ? (target - cum[j - 1]) / segLen : 0;
-		const p = poly[j - 1].clone().lerp(poly[j], t);
-		res.push(p);
-	}
-	return res;
-}
 
-/**
- * 拟合通过两个端点的约束圆锥曲线，对中间三点进行最小二乘拟合
- * 圆锥曲线形式：A x^2 + B x y + C y^2 + D x + E y + F = 0 (向量q=[A,B,C,D,E,F])
- * @param {Object} p1 - 第一个端点
- * @param {Object} p2 - 第二个端点
- * @param {Array} middlePts - 中间点数组
- * @returns {Object|null} 圆锥曲线参数或null
- */
-function fitConicConstrainedThrough(p1, p2, middlePts) {
-	// 端点的约束矩阵 C q = 0
-	function rowFromPoint(pt) { const x = pt.x, y = pt.y; return [x * x, x * y, y * y, x, y, 1]; }
-	const C = [rowFromPoint(p1), rowFromPoint(p2)];
-	// C的零空间（维度4）
-	const Ns = nullSpace(C);
-	if (!Ns) return null;
-	// 表示 q = Ns * z，最小化 ||A q||，其中A来自中间点
-	const A = middlePts.map(rowFromPoint);
-	// 构建 M = A * Ns，求解 min ||M z|| -> (M^T M)的特征值
-	const M = A.map(aRow => {
-		const out = new Array(Ns[0].length).fill(0);
-		for (let j = 0; j < Ns.length; j++) {
-			const coeff = aRow[j];
-			for (let k = 0; k < Ns[0].length; k++) out[k] += coeff * Ns[j][k];
-		}
-		return out;
-	});
-	const MtM = Array.from({ length: Ns[0].length }, () => Array(Ns[0].length).fill(0));
-	for (let i = 0; i < M.length; i++) for (let j = 0; j < MtM.length; j++) for (let k = 0; k < MtM.length; k++) MtM[j][k] += M[i][j] * M[i][k];
-	const eig = eigenSymmetric(MtM);
-	if (!eig) return null;
-	const order = eig.values.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v).map(o => o.i);
-	const z = order.map(i => (i === 0 ? 1 : 0)); // 取最小特征值的特征向量；下面构建显式向量
-	// 实际上需要实际的特征向量列
-	const V = eig.vectors;
-	const zvec = V.map(row => row[order[0]]);
-	// q = Ns * zvec
-	const q = new Array(6).fill(0);
-	for (let j = 0; j < Ns.length; j++) for (let k = 0; k < Ns[0].length; k++) q[j] += Ns[j][k] * zvec[k];
-	return { a: q[0], b: q[1], c: q[2], d: q[3], e: q[4], f: q[5] };
-}
 
-/**
- * 计算矩阵C的零空间基
- * @param {Array} C - 矩阵C (m x n)
- * @returns {Array|null} n x r矩阵列作为基或null
- */
-function nullSpace(C) {
-	const m = C.length; const n = C[0].length;
-	// C的SVD分解得到V；零空间是奇异值约等于0的列
-	const svd = svdDecompose(C);
-	if (!svd) return null;
-	const V = svd.V; // n x n
-	// 我们需要最后 n - rank 列；在一般位置有两个约束 -> rank 2 -> r=4
-	const r = Math.max(1, n - 2);
-	const Ns = Array.from({ length: n }, () => Array(r).fill(0));
-	for (let j = 0; j < r; j++) {
-		const col = V.map(row => row[n - r + j]);
-		for (let i = 0; i < n; i++) Ns[i][j] = col[i];
-	}
-	return Ns;
-}
 
-/**
- * 采样约束双曲线，确保端点作为第一个/最后一个采样点包含在内
- * @param {Object} conic - 圆锥曲线参数
- * @param {Object} end1 - 第一个端点
- * @param {Object} end2 - 第二个端点
- * @param {Array} mids - 中间点数组
- * @param {number} count - 采样数量
- * @returns {Array} 采样结果
- */
-function sampleHyperbolaConicConstrained(conic, end1, end2, mids, count) {
-	// 在2D中按端点之间的x采样；确保end1->end2按x排序
-	let a = end1, b = end2;
-	let reverse = false;
-	if (a.x > b.x) { const t = a; a = b; b = t; reverse = true; }
-	const xs = [];
-	for (let i = 0; i < count; i++) xs.push(a.x + (b.x - a.x) * (i / (count - 1)));
-	const { A, branchYs } = precomputeBranchSelector(conic, mids);
-	const res = [];
-	for (let i = 0; i < xs.length; i++) {
-		const x = xs[i];
-		const ys = solveConicY(conic, x);
-		if (!ys) continue;
-		const y = selectBranch(ys, branchYs);
-		res.push({ x, y });
-	}
-	if (reverse) res.reverse();
-	// 用端点精确替换第一个/最后一个以确保通过
-	if (res.length) { res[0] = { x: end1.x, y: end1.y }; res[res.length - 1] = { x: end2.x, y: end2.y }; }
-	return res;
-}
 
-/**
- * 预计算分支选择器
- * @param {Object} conic - 圆锥曲线参数
- * @param {Array} mids - 中间点数组
- * @returns {Object} 分支选择器对象
- */
-function precomputeBranchSelector(conic, mids) {
-	const branchYs = mids.map(p => p.y).sort((a, b) => a - b);
-	return { A: 0, branchYs };
-}
 
-/**
- * 求解圆锥曲线的y值
- * @param {Object} conic - 圆锥曲线参数
- * @param {number} x - x坐标
- * @returns {Array|null} y值数组或null
- */
-function solveConicY(conic, x) {
-	const { a, b, c, d, e, f } = conic;
-	const qa = c;
-	const qb = b * x + e;
-	const qc = a * x * x + d * x + f;
-	const disc = qb * qb - 4 * qa * qc;
-	if (disc < 0) return null;
-	const s = Math.sqrt(Math.max(0, disc));
-	return [(-qb + s) / (2 * qa), (-qb - s) / (2 * qa)];
-}
 
-/**
- * 选择分支
- * @param {Array} ys - y值数组
- * @param {Array} branchYs - 分支y值数组
- * @returns {number} 选择的y值
- */
-function selectBranch(ys, branchYs) {
-	// 选择更接近中间采样中位数的y
-	const median = branchYs[Math.floor(branchYs.length / 2)];
-	return Math.abs(ys[0] - median) < Math.abs(ys[1] - median) ? ys[0] : ys[1];
-}
 
-/**
- * 基本SVD分解（小尺寸的数值方法回退）
- * @param {Array} A - 矩阵A
- * @returns {Object|null} SVD结果或null
- */
-function svdDecompose(A) {
-	// 使用Gram矩阵通过A^T A的特征值得到V，然后轻量计算U,S。足以得到V的最后一列。
-	const m = A.length; if (m === 0) return null; const n = A[0].length;
-	// 计算AtA
-	const AtA = Array.from({ length: n }, () => Array(n).fill(0));
-	for (let i = 0; i < m; i++) {
-		for (let j = 0; j < n; j++) {
-			for (let k = 0; k < n; k++) {
-				AtA[j][k] += A[i][j] * A[i][k];
-			}
-		}
-	}
-	// AtA的特征分解（对称）
-	const eig = eigenSymmetric(AtA);
-	if (!eig) return null;
-	// 按特征值升序排序（最小给出最小奇异向量）
-	const idx = eig.values.map((v, i) => ({ v, i })).sort((p, q) => p.v - q.v).map(o => o.i);
-	const V = eig.vectors.map(row => idx.map(i => row[i]));
-	return { V };
-}
 
-/**
- * 对称矩阵特征分解
- * @param {Array} M - 对称矩阵
- * @returns {Object|null} 特征值和特征向量或null
- */
-function eigenSymmetric(M) {
-	const n = M.length;
-	// Jacobi特征值算法
-	let A = M.map(row => row.slice());
-	let V = Array.from({ length: n }, (_, i) => {
-		const r = Array(n).fill(0); r[i] = 1; return r;
-	});
-	for (let iter = 0; iter < 50; iter++) {
-		// 找到最大的非对角元素
-		let p = 0, q = 1, max = Math.abs(A[0][1]);
-		for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
-			const val = Math.abs(A[i][j]);
-			if (val > max) { max = val; p = i; q = j; }
-		}
-		if (max < 1e-10) break;
-		const app = A[p][p], aqq = A[q][q], apq = A[p][q];
-		const phi = 0.5 * Math.atan2(2 * apq, (aqq - app));
-		const c = Math.cos(phi), s = Math.sin(phi);
-		// 旋转A
-		for (let i = 0; i < n; i++) {
-			const aip = A[i][p], aiq = A[i][q];
-			A[i][p] = c * aip - s * aiq;
-			A[i][q] = s * aip + c * aiq;
-		}
-		for (let j = 0; j < n; j++) {
-			const apj = A[p][j], aqj = A[q][j];
-			A[p][j] = c * apj - s * aqj;
-			A[q][j] = s * apj + c * aqj;
-		}
-		A[p][p] = c * c * app - 2 * s * c * apq + s * s * aqq;
-		A[q][q] = s * s * app + 2 * s * c * apq + c * c * aqq;
-		A[p][q] = A[q][p] = 0;
-		// 旋转V
-		for (let i = 0; i < n; i++) {
-			const vip = V[i][p], viq = V[i][q];
-			V[i][p] = c * vip - s * viq;
-			V[i][q] = s * vip + c * viq;
-		}
-	}
-	const values = Array.from({ length: n }, (_, i) => A[i][i]);
-	return { values, vectors: V };
-}
 
 /**
  * 从接触点生成路径
@@ -2239,7 +1640,7 @@ function saveSettings() {
 	if (!isNaN(newWireDiameter) && newWireDiameter > 0) wireRadius = newWireDiameter / 2;
 	if (!isNaN(newMarkerDiameter) && newMarkerDiameter > 0) markerRadius = newMarkerDiameter / 2;
 	if (!isNaN(newControlPoints) && newControlPoints >= 3 && newControlPoints <= 20) controlPointsCount = newControlPoints;
-	if (!isNaN(newSmoothPoints) && newSmoothPoints >= 20 && newSmoothPoints <= 200) smoothPointsCount = newSmoothPoints;
+	if (!isNaN(newSmoothPoints) && newSmoothPoints >= 5 && newSmoothPoints <= 200) smoothPointsCount = newSmoothPoints;
 
 	saveParameters();
 	redrawScene();
@@ -2270,14 +1671,10 @@ function wireEvents() {
 			toggleContactPointsMode();
 		} else if (mode === 'parabola') {
 			if (isContactPointsMode) toggleContactPointsMode();
-			if (isHyperbolaMode) exitHyperbolaMode();
 			enterParabolaMode();
 		} else {
 			if (isContactPointsMode) {
 				toggleContactPointsMode(); // 退出接触点模式
-			}
-			if (isHyperbolaMode) {
-				exitHyperbolaMode();
 			}
 			if (isParabolaMode) {
 				exitParabolaMode();
