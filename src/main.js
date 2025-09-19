@@ -3,110 +3,110 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DragControls } from 'three/addons/controls/DragControls.js';
 
-let scene, camera, renderer, controls;
-let modelMesh = null;
-let points = [];
-let archCurveObject = null;
-let pointMarkers = [];
-let draggableObjects = [];
+// 全局变量定义
+let scene, camera, renderer, controls; // 场景、相机、渲染器、控制器
+let modelMesh = null; // 3D模型网格
+let points = []; // 路径点数组
+let archCurveObject = null; // 弓丝曲线对象
+let pointMarkers = []; // 点标记数组
+let draggableObjects = []; // 可拖拽对象数组
 
-// Plane setup
-let planeControlPoints = [];
-let referencePlaneMesh = null;
-let planeNormal = new THREE.Vector3(0, 1, 0);
-let planeDragControls = null;
+// 参考平面设置
+let planeControlPoints = []; // 平面控制点数组
+let referencePlaneMesh = null; // 参考平面网格
+let planeNormal = new THREE.Vector3(0, 1, 0); // 平面法向量
+let planeDragControls = null; // 平面拖拽控制器
 
-// Modes
-let isPlaneMode = false;
-let isDrawingMode = false;
-let isEditMode = false;
-let isContactPointsMode = false;
-let isHyperbolaMode = false; // 已废弃，不再从UI进入
-let isParabolaMode = false;
-let isAIGenerationMode = false;
-let lastAIResponse = null; // 存储最后的AI响应用于调试导出
+// 操作模式
+let isPlaneMode = false; // 平面模式
+let isDrawingMode = false; // 绘制模式
+let isEditMode = false; // 编辑模式
+let isContactPointsMode = false; // 接触点模式
+let isParabolaMode = false; // 抛物线模式
+let isMultiSelectMode = false; // 多选模式
 
-// Selection for U-loop
-const SELECTION_COLOR_ULOOP = 0x9932CC;
-const SELECTION_COLOR_ULOOP_MIDDLE = 0xFFA500; // 橙色用于中间点
-let uLoopSelectionIndices = [];
+// U型曲选择相关
+const SELECTION_COLOR_ULOOP = 0x9932CC; // U型曲选择颜色（紫色）
+const SELECTION_COLOR_ULOOP_MIDDLE = 0xFFA500; // 中间点颜色（橙色）
+let uLoopSelectionIndices = []; // U型曲选择索引数组
 
-// Contact points mode
-let contactPoints = [];
-let contactPointMarkers = [];
-let selectedContactPoints = [];
-const CONTACT_POINT_COLOR = 0x00FF00; // 绿色
-const SELECTED_CONTACT_POINT_COLOR = 0xFF6600; // 橙色
+// 多选模式相关
+const MULTI_SELECT_COLOR = 0xFFD700; // 多选点颜色（金色）
+let multiSelectedIndices = []; // 多选点索引数组
 
-// Hyperbola mode state (kept for backward compatibility, not used by UI)
-let hyperbolaSelectedContactPoints = [];
-let hyperbolaShortCurvePoints = [];
-let hyperbolaGuideLine = null;
-const HYPERBOLA_SAMPLE_COLOR = 0x00BFFF; // 已不再使用手动采样标记，保留颜色常量
+// 接触点模式
+let contactPoints = []; // 接触点数组
+let contactPointMarkers = []; // 接触点标记数组
+let selectedContactPoints = []; // 选中的接触点数组
+const CONTACT_POINT_COLOR = 0x00FF00; // 接触点颜色（绿色）
+const SELECTED_CONTACT_POINT_COLOR = 0xFF6600; // 选中接触点颜色（橙色）
 
-// Parabola mode state
-let parabolaPickedPoints = [];
-let parabolaMarkers = [];
-const PARABOLA_MARKER_COLOR = 0x00BFFF;
 
-// Undo history
-let historyStack = [];
+// 抛物线模式状态
+let parabolaPickedPoints = []; // 抛物线拾取的点
+let parabolaMarkers = []; // 抛物线标记
+const PARABOLA_MARKER_COLOR = 0x00BFFF; // 抛物线标记颜色
 
-// UI Elements
-const canvas = document.getElementById('mainCanvas');
-const stlInput = document.getElementById('stl-input');
-const jsonImport = document.getElementById('json-import');
-const exportBtn = document.getElementById('export-json');
-const opacitySlider = document.getElementById('opacity');
-const statusEl = document.getElementById('status');
-const planeStatusEl = document.getElementById('plane-status');
-const enterPlaneBtn = document.getElementById('enter-plane-mode');
-const confirmPlaneBtn = document.getElementById('confirm-plane');
-const togglePlaneVisibilityBtn = document.getElementById('toggle-plane-visibility');
-const designModeSelect = document.getElementById('design-mode');
-const toggleDrawBtn = document.getElementById('toggle-draw');
-const toggleEditBtn = document.getElementById('toggle-edit');
-const clearAllBtn = document.getElementById('clear-all');
-const generateUloopBtn = document.getElementById('generate-uloop');
-const undoBtn = document.getElementById('undo');
-const openSettingsBtn = document.getElementById('open-settings');
-const settingsModal = document.getElementById('settings-modal');
-const cancelSettingsBtn = document.getElementById('cancel-settings');
-const saveSettingsBtn = document.getElementById('save-settings');
-const wireDiameterInput = document.getElementById('wire-diameter-input');
-const markerDiameterInput = document.getElementById('marker-diameter-input');
-const controlPointsInput = document.getElementById('control-points-input');
-const smoothPointsInput = document.getElementById('smooth-points-input');
-// AI Generation UI elements
-const aiModeUI = document.getElementById('ai-mode-ui');
-const geminiApiKeyInput = document.getElementById('gemini-api-key');
-const aiPromptInput = document.getElementById('ai-prompt');
-const generateAiPathBtn = document.getElementById('generate-ai-path');
-const exportContactPointsBtn = document.getElementById('export-contact-points');
-const exportAiResponseBtn = document.getElementById('export-ai-response');
-const aiStatusEl = document.getElementById('ai-status');
-// Removed U-loop parameters
 
-// Geometry params (with defaults from design specs)
-let wireRadius = 0.4; // mm (visual tube radius)
-let markerRadius = 0.4; // mm (marker sphere radius)
+// 撤销历史
+let historyStack = []; // 历史状态栈
+
+// UI元素
+const canvas = document.getElementById('mainCanvas'); // 主画布
+const stlInput = document.getElementById('stl-input'); // STL文件输入
+const jsonImport = document.getElementById('json-import'); // JSON导入
+const exportBtn = document.getElementById('export-json'); // 导出按钮
+const opacitySlider = document.getElementById('opacity'); // 透明度滑块
+const statusEl = document.getElementById('status'); // 状态显示
+const planeStatusEl = document.getElementById('plane-status'); // 平面状态显示
+const enterPlaneBtn = document.getElementById('enter-plane-mode'); // 进入平面模式按钮
+const confirmPlaneBtn = document.getElementById('confirm-plane'); // 确认平面按钮
+const togglePlaneVisibilityBtn = document.getElementById('toggle-plane-visibility'); // 切换平面可见性按钮
+const designModeSelect = document.getElementById('design-mode'); // 设计模式选择
+const toggleDrawBtn = document.getElementById('toggle-draw'); // 切换绘制按钮
+const toggleEditBtn = document.getElementById('toggle-edit'); // 切换编辑按钮
+const toggleMultiSelectBtn = document.getElementById('toggle-multi-select'); // 切换多选按钮
+const clearAllBtn = document.getElementById('clear-all'); // 清除全部按钮
+const generateUloopBtn = document.getElementById('generate-uloop'); // 生成U型曲按钮
+const undoBtn = document.getElementById('undo'); // 撤销按钮
+const openSettingsBtn = document.getElementById('open-settings'); // 打开设置按钮
+const settingsModal = document.getElementById('settings-modal'); // 设置模态框
+const cancelSettingsBtn = document.getElementById('cancel-settings'); // 取消设置按钮
+const saveSettingsBtn = document.getElementById('save-settings'); // 保存设置按钮
+const wireDiameterInput = document.getElementById('wire-diameter-input'); // 弓丝直径输入
+const markerDiameterInput = document.getElementById('marker-diameter-input'); // 标记直径输入
+const controlPointsInput = document.getElementById('control-points-input'); // 控制点数量输入
+const smoothPointsInput = document.getElementById('smooth-points-input'); // 平滑曲线点数输入
+// 已移除U型曲参数
+
+// 几何参数（使用设计规格的默认值）
+let wireRadius = 0.4; // 弓丝半径（毫米，视觉管半径）
+let markerRadius = 0.4; // 标记半径（毫米，标记球半径）
 let controlPointsCount = 10; // 控制点数量
 let smoothPointsCount = 50; // 平滑曲线点数
 
-// Parameter storage key
+// 参数存储键
 const PARAMS_STORAGE_KEY = 'dental_designer_params';
 
-// Interaction helpers
-const raycaster = new THREE.Raycaster();
-const mouse = new THREE.Vector2();
-let isDraggingView = false;
-let mouseDownPos = new THREE.Vector2();
-let dragControls = null;
+// 交互辅助工具
+const raycaster = new THREE.Raycaster(); // 射线投射器
+const mouse = new THREE.Vector2(); // 鼠标位置
+let isDraggingView = false; // 是否正在拖拽视图
+let mouseDownPos = new THREE.Vector2(); // 鼠标按下位置
+let dragControls = null; // 拖拽控制器
 
+/**
+ * 设置状态消息
+ * @param {string} message - 要显示的状态消息
+ */
 function setStatus(message) {
 	statusEl.textContent = message || '';
 }
 
+/**
+ * 初始化3D场景
+ * 创建场景、相机、渲染器、光照和控制器
+ */
 function initScene() {
 	scene = new THREE.Scene();
 	scene.background = new THREE.Color(0x0b1220);
@@ -129,7 +129,7 @@ function initScene() {
 
 	window.addEventListener('resize', onWindowResize);
 
-	// Canvas interactions
+	// 画布交互事件
 	canvas.addEventListener('mousedown', onCanvasMouseDown, true);
 	canvas.addEventListener('mousemove', onCanvasMouseMove, false);
 	canvas.addEventListener('mouseup', onCanvasMouseUp, false);
@@ -139,18 +139,26 @@ function initScene() {
 		}
 	});
 
-	// Load saved parameters
+	// 加载保存的参数
 	loadParameters();
 
 	animate();
 }
 
+/**
+ * 处理窗口大小变化
+ * 更新相机宽高比和渲染器尺寸
+ */
 function onWindowResize() {
 	camera.aspect = window.innerWidth / window.innerHeight;
 	camera.updateProjectionMatrix();
 	renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
+/**
+ * 加载STL文件
+ * @param {File} file - STL文件对象
+ */
 function loadSTLFile(file) {
 	if (!file) return;
 	const reader = new FileReader();
@@ -191,6 +199,10 @@ function loadSTLFile(file) {
 	reader.readAsArrayBuffer(file);
 }
 
+/**
+ * 启用平面UI
+ * 设置平面相关按钮的状态
+ */
 function enablePlaneUI() {
 	enterPlaneBtn.disabled = false;
 	confirmPlaneBtn.disabled = true;
@@ -199,18 +211,26 @@ function enablePlaneUI() {
 	planeStatusEl.textContent = '请在牙模上点击3个点来定义平面。';
 }
 
+/**
+ * 进入平面模式
+ * 设置平面模式状态并隐藏路径编辑
+ */
 function enterPlaneMode() {
 	isPlaneMode = true;
 	isDrawingMode = false;
 	isEditMode = false;
 	updateModeButtons();
 	planeStatusEl.textContent = `请在牙模上点击 ${Math.max(0, 3 - planeControlPoints.length)} 个点来定义平面。`;
-	// Hide path editing while in plane mode
+	// 在平面模式下隐藏路径编辑
 	setMarkersVisibility(false);
 	if (archCurveObject) archCurveObject.visible = false;
 	setupPlaneDragControls();
 }
 
+/**
+ * 确认平面
+ * 退出平面模式并启用设计UI
+ */
 function confirmPlane() {
 	isPlaneMode = false;
 	planeStatusEl.textContent = '参考平面已确认。';
@@ -219,19 +239,27 @@ function confirmPlane() {
 		planeDragControls = null;
 	}
 	setupPointDragControls();
-	// Enable design UI
+	// 启用设计UI
 	disableDesignUI(false);
 	if (archCurveObject) archCurveObject.visible = true;
 	togglePlaneVisibilityBtn.disabled = false;
 	setStatus('请选择操作模式。');
 }
 
+/**
+ * 切换平面可见性
+ * 显示或隐藏参考平面
+ */
 function togglePlaneVisibility() {
 	if (!referencePlaneMesh) return;
 	referencePlaneMesh.visible = !referencePlaneMesh.visible;
 	togglePlaneVisibilityBtn.textContent = referencePlaneMesh.visible ? '隐藏平面' : '显示平面';
 }
 
+/**
+ * 添加平面控制点
+ * @param {THREE.Vector3} position - 控制点位置
+ */
 function addPlaneControlPoint(position) {
 	if (planeControlPoints.length >= 3) return;
 	const geometry = new THREE.SphereGeometry(0.4, 32, 32);
@@ -244,10 +272,14 @@ function addPlaneControlPoint(position) {
 	if (planeControlPoints.length === 3) {
 		updateReferencePlane();
 		confirmPlaneBtn.disabled = false;
-		planeStatusEl.textContent = '平面已定义。可拖动控制点调整，或点击“确认平面”。';
+		planeStatusEl.textContent = '平面已定义。可拖动控制点调整，或点击"确认平面"。';
 	}
 }
 
+/**
+ * 设置平面拖拽控制器
+ * 允许用户拖拽平面控制点
+ */
 function setupPlaneDragControls() {
 	if (planeDragControls) planeDragControls.dispose();
 	planeDragControls = new DragControls(planeControlPoints, camera, renderer.domElement);
@@ -256,6 +288,10 @@ function setupPlaneDragControls() {
 	planeDragControls.addEventListener('dragend', () => { controls.enabled = true; });
 }
 
+/**
+ * 更新参考平面
+ * 根据三个控制点重新计算平面
+ */
 function updateReferencePlane() {
 	if (planeControlPoints.length < 3) return;
 	const [p1, p2, p3] = planeControlPoints.map(p => p.position);
@@ -271,7 +307,10 @@ function updateReferencePlane() {
 	referencePlaneMesh.lookAt(p1.clone().add(plane.normal));
 }
 
-// 计算参考平面与模型的接触点
+/**
+ * 计算参考平面与模型的接触点
+ * 找到模型表面与参考平面相交的点
+ */
 function calculateContactPoints() {
 	if (!modelMesh || !referencePlaneMesh) return;
 	
@@ -332,7 +371,13 @@ function calculateContactPoints() {
 	}
 }
 
-// 按照角度对接触点进行排序
+/**
+ * 按照角度对接触点进行排序
+ * @param {Array} points - 接触点数组
+ * @param {THREE.Vector3} planePosition - 平面位置
+ * @param {THREE.Vector3} planeNormal - 平面法向量
+ * @returns {Array} 排序后的点数组
+ */
 function sortContactPointsByAngle(points, planePosition, planeNormal) {
 	// 创建平面内的两个正交向量
 	const up = new THREE.Vector3(0, 1, 0);
@@ -362,7 +407,11 @@ function sortContactPointsByAngle(points, planePosition, planeNormal) {
 	});
 }
 
-// 使用TSP最短路径算法对接触点进行排序
+/**
+ * 使用TSP最短路径算法对接触点进行排序
+ * @param {Array} points - 接触点数组
+ * @returns {Array} 排序后的点数组
+ */
 function sortContactPointsByTSP(points) {
 	if (points.length <= 2) return points;
 	
@@ -398,7 +447,13 @@ function sortContactPointsByTSP(points) {
 	return sortedPoints;
 }
 
-// 找到参考平面与模型交线的中心点
+/**
+ * 找到参考平面与模型交线的中心点
+ * @param {Array} points - 交点数组
+ * @param {THREE.Vector3} planePosition - 平面位置
+ * @param {THREE.Vector3} planeNormal - 平面法向量
+ * @returns {THREE.Vector3} 中心点
+ */
 function findIntersectionCurveCenter(points, planePosition, planeNormal) {
 	if (points.length === 0) return planePosition;
 	
@@ -410,7 +465,12 @@ function findIntersectionCurveCenter(points, planePosition, planeNormal) {
 	return center;
 }
 
-// 点聚类函数
+/**
+ * 点聚类函数
+ * @param {Array} points - 点数组
+ * @param {number} radius - 聚类半径
+ * @returns {Array} 聚类后的中心点数组
+ */
 function clusterPoints(points, radius) {
 	const clusters = [];
 	const used = new Set();
@@ -442,7 +502,10 @@ function clusterPoints(points, radius) {
 	return clusters;
 }
 
-// 创建接触点标记
+/**
+ * 创建接触点标记
+ * @param {THREE.Vector3} position - 标记位置
+ */
 function createContactPointMarker(position) {
 	const geometry = new THREE.SphereGeometry(0.3, 16, 16);
 	const material = new THREE.MeshBasicMaterial({ color: CONTACT_POINT_COLOR });
@@ -453,7 +516,10 @@ function createContactPointMarker(position) {
 	contactPointMarkers.push(marker);
 }
 
-// 清除接触点
+/**
+ * 清除接触点
+ * 移除所有接触点标记和相关数据
+ */
 function clearContactPoints() {
 	contactPointMarkers.forEach(marker => scene.remove(marker));
 	contactPointMarkers = [];
@@ -461,6 +527,10 @@ function clearContactPoints() {
 	selectedContactPoints = [];
 }
 
+/**
+ * 重置平面
+ * 清除所有平面控制点和参考平面
+ */
 function resetPlane() {
 	planeControlPoints.forEach(p => scene.remove(p));
 	planeControlPoints = [];
@@ -474,18 +544,26 @@ function resetPlane() {
 	togglePlaneVisibilityBtn.disabled = true;
 }
 
-// Path design (module three)
+/**
+ * 禁用/启用设计UI
+ * @param {boolean} disabled - 是否禁用
+ */
 function disableDesignUI(disabled) {
 	designModeSelect.disabled = disabled;
 	toggleDrawBtn.disabled = disabled;
 	toggleEditBtn.disabled = disabled;
+	toggleMultiSelectBtn.disabled = disabled;
 	clearAllBtn.disabled = disabled;
 	generateUloopBtn.disabled = true;
 	undoBtn.disabled = historyStack.length === 0;
 }
 
+/**
+ * 更新模式按钮状态
+ * 根据当前模式更新按钮文本和状态消息
+ */
 function updateModeButtons() {
-	// plane mode handled separately
+	// 平面模式单独处理
 	if (isDrawingMode) {
 		toggleDrawBtn.textContent = '结束绘制';
 		setStatus('绘制模式：单击牙模添加点。');
@@ -495,576 +573,122 @@ function updateModeButtons() {
 	if (isEditMode) {
 		setStatus('编辑模式：拖动点修改路径。按住Shift单击选择三个端点。');
 	}
+	if (isMultiSelectMode) {
+		toggleMultiSelectBtn.textContent = '退出多选';
+		setStatus('多选模式：点击选择点，选择两个点后它们之间的所有点都会自动选中，然后拖拽移动。');
+	} else {
+		toggleMultiSelectBtn.textContent = '多选模式';
+	}
 	if (isContactPointsMode) {
 		setStatus('接触点模式：单击接触点选择起点和终点。');
 	}
 	if (isParabolaMode) {
 		setStatus('抛物线模式：在牙模上点击选择3个点进行拟合。');
 	}
-	if (isAIGenerationMode) {
-		setStatus('AI生成模式：自动分析接触点并生成最优路径。');
-	}
-	if (!isDrawingMode && !isEditMode && !isPlaneMode && !isContactPointsMode && !isHyperbolaMode && !isAIGenerationMode) {
+	if (!isDrawingMode && !isEditMode && !isPlaneMode && !isContactPointsMode && !isMultiSelectMode) {
 		setStatus('请选择操作模式。');
 	}
 }
 
-function updateAIModeButtons() {
-	const hasApiKey = geminiApiKeyInput.value.trim().length > 0;
-	const hasContactPoints = contactPoints.length > 0;
-	const hasAIResponse = lastAIResponse !== null;
-	
-	generateAiPathBtn.disabled = !hasApiKey || !hasContactPoints;
-	exportContactPointsBtn.disabled = !hasContactPoints;
-	exportAiResponseBtn.disabled = !hasAIResponse;
-}
-
-// Gemini API integration
-async function callGeminiAPI(apiKey, prompt, contactPointsData) {
-	// 尝试多个可用的模型
-	const models = [
-		'gemini-2.5-flash',
-		'gemini-2.5-pro',
-		'gemini-1.5-flash'
-	];
-	
-	for (const model of models) {
-		try {
-			const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-			console.log(`尝试使用模型: ${model}`);
-			return await callGeminiAPIWithModel(url, prompt, contactPointsData);
-		} catch (error) {
-			console.warn(`模型 ${model} 失败:`, error.message);
-			if (model === models[models.length - 1]) {
-				// 如果所有模型都失败了，抛出最后一个错误
-				throw error;
-			}
-		}
-	}
-}
-
-async function callGeminiAPIWithModel(url, prompt, contactPointsData) {
-	// 简化请求格式，避免复杂的schema导致500错误
-	const requestBody = {
-		contents: [{
-			parts: [{
-				text: `${prompt}\n\n接触点数据（JSON格式）：\n${JSON.stringify(contactPointsData, null, 2)}`
-			}]
-		}],
-		generationConfig: {
-			temperature: 0.7,
-			topK: 40,
-			topP: 0.95,
-			maxOutputTokens: 2048,
-		}
-	};
-	
-	try {
-		console.log('调用Gemini API，URL:', url);
-		console.log('请求体:', JSON.stringify(requestBody, null, 2));
-		
-		const response = await fetch(url, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-			},
-			body: JSON.stringify(requestBody)
-		});
-		
-		console.log('API响应状态:', response.status, response.statusText);
-		
-		if (!response.ok) {
-			const errorText = await response.text();
-			console.error('API错误响应:', errorText);
-			throw new Error(`API请求失败: ${response.status} ${response.statusText}. 响应: ${errorText}`);
-		}
-		
-		const data = await response.json();
-		console.log('API响应数据:', data);
-		// 安全策略拦截提示
-		if (data.promptFeedback && data.promptFeedback.blockReason) {
-			const reason = data.promptFeedback.blockReason;
-			throw new Error(`提示被安全策略拦截（${reason}）。请尝试修改prompt或降低敏感内容。`);
-		}
-		
-		// 先尝试结构化提取
-		const structured = extractStructuredResult(data);
-		if (structured) {
-			// 保存AI响应用于调试
-			saveAIResponseForDebug(data, structured);
-			return JSON.stringify(structured);
-		}
-		// 再退化为提取文本
-		const text = extractTextFromResponse(data);
-		if (text) {
-			// 保存AI响应用于调试
-			saveAIResponseForDebug(data, { rawText: text });
-			return text;
-		}
-		throw new Error('API返回数据中没有找到文本内容');
-	} catch (error) {
-		console.error('Gemini API调用失败:', error);
-		throw error;
-	}
-}
-
-// 从API响应中尽可能提取可读文本
-function extractTextFromResponse(data) {
-  try {
-    if (!data) return '';
-    // 1) candidates[].content.parts[].text
-    if (Array.isArray(data.candidates)) {
-      for (const c of data.candidates) {
-        if (c && c.content && Array.isArray(c.content.parts)) {
-          const texts = c.content.parts
-            .map(p => (p && typeof p.text === 'string') ? p.text : '')
-            .filter(Boolean);
-          if (texts.length) return texts.join('\n');
-        }
-        // 2) candidates[].text 或 candidates[].output_text（某些变体）
-        if (typeof c?.text === 'string' && c.text.length) return c.text;
-        if (typeof c?.output_text === 'string' && c.output_text.length) return c.output_text;
-      }
-    }
-    // 3) 顶层简化字段（极少数变体）
-    if (typeof data.text === 'string' && data.text.length) return data.text;
-    if (typeof data.output_text === 'string' && data.output_text.length) return data.output_text;
-  } catch (e) {
-    console.warn('extractTextFromResponse 失败:', e);
-  }
-  return '';
-}
-
-// 从响应对象中提取结构化 { selectedPoints, reasoning, pathType }
-function extractStructuredResult(data) {
-  try {
-    if (!data) return null;
-    // 尝试解析 parts.inlineData 的 base64 JSON
-    const inline = extractInlineJSON(data);
-    if (inline) {
-      const found = findSelectedPointsObject(inline);
-      if (found) return found;
-    }
-    // 直接在响应对象中递归查找
-    const found = findSelectedPointsObject(data);
-    if (found) return found;
-  } catch (e) {
-    console.warn('extractStructuredResult 失败:', e);
-  }
-  return null;
-}
-
-function extractInlineJSON(data) {
-  try {
-    if (!Array.isArray(data.candidates)) return null;
-    for (const c of data.candidates) {
-      if (!c?.content?.parts) continue;
-      for (const p of c.content.parts) {
-        const inl = p?.inlineData;
-        if (inl && typeof inl.data === 'string' && inl.data.length && /json/i.test(inl.mimeType || '')) {
-          try {
-            const decoded = decodeBase64ToString(inl.data);
-            return JSON.parse(decoded);
-          } catch (e) {
-            console.warn('解析inlineData失败:', e);
-          }
-        }
-        // 一些模型可能把JSON字符串放在p.text
-        if (typeof p?.text === 'string') {
-          const trimmed = p.text.trim();
-          if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-            try { return JSON.parse(trimmed); } catch {}
-          }
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('extractInlineJSON 失败:', e);
-  }
-  return null;
-}
-
-function decodeBase64ToString(b64) {
-  try {
-    // 兼容非ASCII
-    const binary = atob(b64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const decoder = new TextDecoder('utf-8');
-    return decoder.decode(bytes);
-  } catch (e) {
-    console.warn('decodeBase64ToString 失败，使用降级方案:', e);
-    return atob(b64);
-  }
-}
-
-function findSelectedPointsObject(obj) {
-  // 在任意嵌套层级查找包含 selectedPoints 的对象
-  if (!obj || typeof obj !== 'object') return null;
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      const res = findSelectedPointsObject(item);
-      if (res) return res;
-    }
-    return null;
-  }
-  // 命中：包含 selectedPoints 数组，且元素有 x,y,z
-  if (Array.isArray(obj.selectedPoints) && obj.selectedPoints.some(isXYZPoint)) {
-    return {
-      selectedPoints: obj.selectedPoints.filter(isXYZPoint),
-      reasoning: typeof obj.reasoning === 'string' ? obj.reasoning : '',
-      pathType: typeof obj.pathType === 'string' ? obj.pathType : 'AI生成路径'
-    };
-  }
-  // 继续递归
-  for (const key of Object.keys(obj)) {
-    const val = obj[key];
-    const res = findSelectedPointsObject(val);
-    if (res) return res;
-  }
-  return null;
-}
-
-function isXYZPoint(p) {
-  return p && typeof p.x === 'number' && typeof p.y === 'number' && typeof p.z === 'number';
-}
-
-// 保存AI响应用于调试
-function saveAIResponseForDebug(rawResponse, parsedData) {
-	try {
-		const debugData = {
-			timestamp: new Date().toISOString(),
-			rawResponse: rawResponse,
-			parsedData: parsedData,
-			model: rawResponse.model || 'unknown'
-		};
-		
-		// 保存到全局变量供手动导出
-		lastAIResponse = debugData;
-		
-		// 自动下载调试文件
-		const blob = new Blob([JSON.stringify(debugData, null, 2)], { type: 'application/json' });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = `ai_response_debug_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-		document.body.appendChild(a);
-		a.click();
-		document.body.removeChild(a);
-		URL.revokeObjectURL(url);
-		
-		console.log('AI响应调试文件已保存');
-	} catch (error) {
-		console.warn('保存AI响应调试文件失败:', error);
-	}
-}
-
-function setAIStatus(message, isError = false) {
-	aiStatusEl.textContent = message;
-	aiStatusEl.className = `text-xs ${isError ? 'text-red-300' : 'text-blue-300'}`;
-	aiStatusEl.classList.remove('hidden');
-}
-
-// 手动导出最后的AI响应
-function exportLastAIResponse() {
-	if (!lastAIResponse) {
-		setAIStatus('没有可导出的AI响应数据', true);
-		return;
-	}
-	
-	try {
-		const blob = new Blob([JSON.stringify(lastAIResponse, null, 2)], { type: 'application/json' });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = `ai_response_manual_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-		document.body.appendChild(a);
-		a.click();
-		document.body.removeChild(a);
-		URL.revokeObjectURL(url);
-		
-		setAIStatus('AI响应已导出');
-	} catch (error) {
-		console.error('导出AI响应失败:', error);
-		setAIStatus('导出AI响应失败', true);
-	}
-}
-
-// Export contact points to JSON
-function exportContactPointsToJSON() {
-	if (contactPoints.length === 0) {
-		setAIStatus('没有接触点可导出', true);
-		return;
-	}
-	
-	const contactPointsData = {
-		contactPoints: contactPoints.map(point => ({
-			x: point.x,
-			y: point.y,
-			z: point.z
-		})),
-		referencePlane: null,
-		metadata: {
-			totalPoints: contactPoints.length,
-			exportTime: new Date().toISOString(),
-			description: "参考平面与牙模的接触点数据"
-		}
-	};
-	
-	// 如果有参考平面，添加参考平面数据
-	if (referencePlaneMesh && planeControlPoints.length === 3) {
-		contactPointsData.referencePlane = {
-			controlPoints: planeControlPoints.map(p => ({ 
-				x: p.position.x, 
-				y: p.position.y, 
-				z: p.position.z 
-			})),
-			normal: {
-				x: planeNormal.x,
-				y: planeNormal.y,
-				z: planeNormal.z
-			},
-			position: {
-				x: referencePlaneMesh.position.x,
-				y: referencePlaneMesh.position.y,
-				z: referencePlaneMesh.position.z
-			}
-		};
-	}
-	
-	// 创建下载链接
-	const a = document.createElement('a');
-	a.href = URL.createObjectURL(new Blob([JSON.stringify(contactPointsData, null, 2)], { type: 'application/json' }));
-	a.download = 'contact_points.json';
-	a.click();
-	URL.revokeObjectURL(a.href);
-	
-	setAIStatus(`已导出 ${contactPoints.length} 个接触点到 contact_points.json`);
-}
-
-// AI Path Generation
-async function generateAIPath() {
-	const apiKey = geminiApiKeyInput.value.trim();
-	if (!apiKey) {
-		setAIStatus('请输入Gemini API密钥', true);
-		return;
-	}
-	
-	if (contactPoints.length === 0) {
-		setAIStatus('没有接触点数据，请先确认参考平面', true);
-		return;
-	}
-	
-	// 准备接触点数据
-	const contactPointsData = {
-		contactPoints: contactPoints.map(point => ({
-			x: point.x,
-			y: point.y,
-			z: point.z
-		})),
-		totalPoints: contactPoints.length
-	};
-	
-	// 获取用户自定义prompt或使用默认prompt
-	const customPrompt = aiPromptInput.value.trim();
-	const defaultPrompt = `你是一个专业的牙科正畸专家，需要根据参考平面与牙模的接触点数据生成最优的前牙唇弓弯折线，参考平面位于前牙牙模牙齿1/2处。
-
-接触点数据：
-${JSON.stringify(contactPointsData, null, 2)}
-
-请分析这些接触点位于牙齿哪个位置，并选择最合适的点来生成一条平滑的前牙唇弓弯折线。考虑以下因素：
-1. 选点要求：在左侧尖牙中 1/2 处到前牙牙冠1/2处再到右侧尖牙中 1/2 处选择且起点和终点分别位于左侧尖牙中 1/2 处和右侧尖牙中 1/2 处。
-2. 弓丝的弧度要求：需与前牙紧密接触，确保力的均匀分布。
-3. 应当只在前牙前缘选择点，不要选择前牙后缘的点，也不要选左右尖牙往两边延伸的点，只选左右尖牙中间的点。
-请返回一个JSON格式的响应，包含：
-{
-  "selectedPoints": [
-    {"x": 数值, "y": 数值, "z": 数值},
-    ...
-  ],
-  "reasoning": "选择这些点的理由说明",
-  "pathType": "路径类型描述（如：平滑曲线、抛物线等）"
-}
-
-请确保selectedPoints数组包含7-10个点，这些点应该能够形成一条平滑的唇弓路径。`;
-
-	const prompt = customPrompt || defaultPrompt;
-	
-	try {
-		setAIStatus('正在调用Gemini API生成路径...');
-		generateAiPathBtn.disabled = true;
-		
-		const response = await callGeminiAPI(apiKey, prompt, contactPointsData);
-		
-		// 解析AI响应
-		const aiResult = parseAIResponse(response);
-		
-		if (aiResult && aiResult.selectedPoints && aiResult.selectedPoints.length > 0) {
-			// 生成路径
-			generatePathFromAISelection(aiResult.selectedPoints);
-			setAIStatus(`AI已生成包含 ${aiResult.selectedPoints.length} 个点的路径。${aiResult.reasoning || ''}`);
-		} else {
-			throw new Error('AI返回的数据格式不正确');
-		}
-		
-	} catch (error) {
-		console.error('AI路径生成失败:', error);
-		setAIStatus(`AI路径生成失败: ${error.message}`, true);
-	} finally {
-		generateAiPathBtn.disabled = false;
-		updateAIModeButtons();
-	}
-}
-
-function parseAIResponse(response) {
-	try {
-		// 先尝试提取```json代码块
-		let jsonStr = '';
-		const fencedJson = response.match(/```json[\r\n]+([\s\S]*?)```/i);
-		if (fencedJson && fencedJson[1]) {
-			jsonStr = fencedJson[1].trim();
-		} else {
-			// 退化：寻找首个大括号包裹的对象（尽量非贪婪）
-			const braceMatch = response.match(/\{[\s\S]*\}/);
-			if (braceMatch) jsonStr = braceMatch[0];
-		}
-		if (jsonStr) {
-			const result = JSON.parse(jsonStr);
-			if (result.selectedPoints && Array.isArray(result.selectedPoints)) return result;
-		}
-		
-		// 如果无法解析JSON，尝试从文本中提取坐标
-		const coordinateMatches = response.match(/\{[^}]*"x"[^}]*\}/g);
-		if (coordinateMatches) {
-			const selectedPoints = coordinateMatches.map(match => {
-				try {
-					return JSON.parse(match);
-				} catch (e) {
-					return null;
-				}
-			}).filter(point => point && typeof point.x === 'number');
-			
-			if (selectedPoints.length > 0) {
-				return {
-					selectedPoints,
-					reasoning: "从AI响应中提取的坐标点",
-					pathType: "AI生成路径"
-				};
-			}
-		}
-		
-		throw new Error('无法从AI响应中提取有效的路径数据');
-	} catch (error) {
-		console.error('解析AI响应失败:', error);
-		throw new Error('AI响应格式错误，请检查prompt或重试');
-	}
-}
-
-function generatePathFromAISelection(selectedPoints) {
-	if (!selectedPoints || selectedPoints.length < 2) {
-		setAIStatus('AI选择的点数量不足', true);
-		return;
-	}
-	
-	// 将AI选择的点转换为THREE.Vector3对象
-	const aiPoints = selectedPoints.map(point => new THREE.Vector3(point.x, point.y, point.z));
-	
-	// 使用平滑曲线算法生成更多点
-	const smoothPoints = generateSmoothCurve(aiPoints);
-	
-	// 清除现有路径并设置新路径
-	saveState();
-	points = smoothPoints;
-	redrawScene();
-	
-	setStatus(`AI已生成包含 ${smoothPoints.length} 个点的平滑路径`);
-}
-
+/**
+ * 切换绘制模式
+ * 开启或关闭绘制模式
+ */
 function toggleDrawMode() {
 	isDrawingMode = !isDrawingMode;
-	if (isDrawingMode) isEditMode = false;
+	if (isDrawingMode) {
+		isEditMode = false;
+		isMultiSelectMode = false;
+	}
 	deselectAllPoints();
+	clearMultiSelection();
 	updateModeButtons();
 }
 
+/**
+ * 切换编辑模式
+ * 开启或关闭编辑模式
+ */
 function toggleEditMode() {
 	isEditMode = !isEditMode;
-	if (isEditMode) isDrawingMode = false;
+	if (isEditMode) {
+		isDrawingMode = false;
+		isMultiSelectMode = false;
+	}
+	clearMultiSelection();
 	updateModeButtons();
 }
 
+/**
+ * 切换多选模式
+ * 开启或关闭多选模式
+ */
+function toggleMultiSelectMode() {
+	isMultiSelectMode = !isMultiSelectMode;
+	if (isMultiSelectMode) {
+		isDrawingMode = false;
+		isEditMode = false;
+		// 清除其他模式的选择
+		deselectAllPoints();
+		clearMultiSelection();
+	}
+	updateModeButtons();
+}
+
+/**
+ * 切换接触点模式
+ * 开启或关闭接触点模式，计算或清除接触点
+ */
 function toggleContactPointsMode() {
 	isContactPointsMode = !isContactPointsMode;
 	if (isContactPointsMode) {
 		isDrawingMode = false;
 		isEditMode = false;
+		isMultiSelectMode = false;
 		// 计算并显示接触点
 		calculateContactPoints();
 	} else {
 		// 清除接触点
 		clearContactPoints();
 	}
+	clearMultiSelection();
 	updateModeButtons();
 }
 
-function enterHyperbolaMode() {
-	isHyperbolaMode = true;
-	isDrawingMode = false;
-	isEditMode = false;
-	// 进入前清理上一次状态
-	clearHyperbolaWorkingState();
-	// 复用接触点检测与显示
-	calculateContactPoints();
-	updateModeButtons();
-}
 
-function exitHyperbolaMode() {
-	isHyperbolaMode = false;
-	clearHyperbolaWorkingState();
-	clearContactPoints();
-	updateModeButtons();
-}
-
+/**
+ * 进入抛物线模式
+ * 清理旧状态并设置抛物线模式
+ */
 function enterParabolaMode() {
 	isParabolaMode = true;
 	isDrawingMode = false;
 	isEditMode = false;
+	isMultiSelectMode = false;
 	// 清理旧状态
 	clearParabolaWorkingState();
+	clearMultiSelection();
 	updateModeButtons();
 }
 
+/**
+ * 退出抛物线模式
+ * 清理抛物线工作状态
+ */
 function exitParabolaMode() {
 	isParabolaMode = false;
 	clearParabolaWorkingState();
 	updateModeButtons();
 }
 
-function enterAIGenerationMode() {
-	isAIGenerationMode = true;
-	isDrawingMode = false;
-	isEditMode = false;
-	isContactPointsMode = false;
-	isParabolaMode = false;
-	// 显示AI模式UI
-	aiModeUI.classList.remove('hidden');
-	// 计算并显示接触点
-	calculateContactPoints();
-	updateModeButtons();
-	updateAIModeButtons();
-}
 
-function exitAIGenerationMode() {
-	isAIGenerationMode = false;
-	// 隐藏AI模式UI
-	aiModeUI.classList.add('hidden');
-	// 清除接触点
-	clearContactPoints();
-	updateModeButtons();
-}
-
+/**
+ * 清除绘制
+ * 清除所有路径点、标记和曲线
+ */
 function clearDrawing() {
 	deselectAllPoints();
+	clearMultiSelection();
 	points = [];
 	pointMarkers.forEach(m => scene.remove(m));
 	pointMarkers = [];
@@ -1081,11 +705,13 @@ function clearDrawing() {
 	}
 	// 清除接触点
 	clearContactPoints();
-	// 清除双曲线工作态
-	clearHyperbolaWorkingState();
 	updateExportAvailability();
 }
 
+/**
+ * 在光标位置添加点
+ * 在鼠标点击的模型表面添加路径点
+ */
 function addPointAtCursor() {
 	if (!modelMesh) return;
 	raycaster.setFromCamera(mouse, camera);
@@ -1115,6 +741,11 @@ function addPointAtCursor() {
 	redrawScene();
 }
 
+/**
+ * 获取偏移点
+ * @param {Object} intersect - 射线相交对象
+ * @returns {THREE.Vector3} 偏移后的点
+ */
 function getOffsetPoint(intersect) {
 	const surfacePoint = intersect.point;
 	const normalMatrix = new THREE.Matrix3().getNormalMatrix(intersect.object.matrixWorld);
@@ -1123,8 +754,12 @@ function getOffsetPoint(intersect) {
 	return surfacePoint.clone().add(offsetVector);
 }
 
+/**
+ * 重绘场景
+ * 清除旧标记，重新创建点标记和曲线
+ */
 function redrawScene() {
-	// clean markers
+	// 清理标记
 	pointMarkers.forEach(m => scene.remove(m));
 	pointMarkers = [];
 	draggableObjects = [];
@@ -1135,11 +770,25 @@ function redrawScene() {
 	updateUndoBtn();
 }
 
+/**
+ * 添加点标记
+ * @param {THREE.Vector3} position - 标记位置
+ * @param {number} index - 点索引
+ */
 function addPointMarker(position, index) {
 	const isULoopInternal = position.userData && position.userData.isULoopInternal;
-	const isSelected = uLoopSelectionIndices.includes(index);
+	const isULoopSelected = uLoopSelectionIndices.includes(index);
+	const isMultiSelected = multiSelectedIndices.includes(index);
+	
+	let color = 0xff0000; // 默认红色
+	if (isULoopSelected) {
+		color = SELECTION_COLOR_ULOOP;
+	} else if (isMultiSelected) {
+		color = MULTI_SELECT_COLOR;
+	}
+	
 	const markerGeometry = new THREE.SphereGeometry(markerRadius, 16, 16);
-	const markerMaterial = new THREE.MeshBasicMaterial({ color: isSelected ? SELECTION_COLOR_ULOOP : 0xff0000 });
+	const markerMaterial = new THREE.MeshBasicMaterial({ color });
 	const marker = new THREE.Mesh(markerGeometry, markerMaterial);
 	marker.position.copy(position);
 	marker.userData = { ...(position.userData || {}), index };
@@ -1152,6 +801,10 @@ function addPointMarker(position, index) {
 	}
 }
 
+/**
+ * 设置点拖拽控制器
+ * 允许用户拖拽路径点
+ */
 function setupPointDragControls() {
 	if (dragControls) dragControls.dispose();
 	dragControls = new DragControls(draggableObjects, camera, renderer.domElement);
@@ -1159,21 +812,36 @@ function setupPointDragControls() {
 	dragControls.addEventListener('drag', (event) => {
 		const idx = event.object.userData.index;
 		if (typeof idx === 'number') {
-			points[idx].copy(event.object.position);
-			updateArchCurve();
+			// 如果是多选模式且拖拽的是选中的点，移动所有选中的点
+			if (isMultiSelectMode && multiSelectedIndices.includes(idx)) {
+				const delta = new THREE.Vector3().subVectors(event.object.position, points[idx]);
+				moveSelectedPoints(delta);
+			} else {
+				// 普通拖拽
+				points[idx].copy(event.object.position);
+				updateArchCurve();
+			}
 		}
 	});
 	dragControls.addEventListener('dragend', (event) => {
 		controls.enabled = true;
 		const idx = event.object.userData.index;
+		
+		// 更新颜色
 		if (uLoopSelectionIndices.includes(idx)) {
 			event.object.material.color.set(SELECTION_COLOR_ULOOP);
+		} else if (multiSelectedIndices.includes(idx)) {
+			event.object.material.color.set(MULTI_SELECT_COLOR);
 		} else {
 			event.object.material.color.set(0xff0000);
 		}
 	});
 }
 
+/**
+ * 更新弓丝曲线
+ * 根据路径点重新生成弓丝曲线
+ */
 function updateArchCurve() {
 	if (archCurveObject) {
 		scene.remove(archCurveObject);
@@ -1193,20 +861,34 @@ function updateArchCurve() {
 	scene.add(archCurveObject);
 }
 
+/**
+ * 设置标记可见性
+ * @param {boolean} visible - 是否可见
+ */
 function setMarkersVisibility(visible) {
 	pointMarkers.forEach(m => m.visible = visible && !(m.userData && m.userData.isULoopInternal));
 }
 
+/**
+ * 更新导出可用性
+ * 根据是否有路径点来启用/禁用导出按钮
+ */
 function updateExportAvailability() {
 	exportBtn.disabled = points.length === 0;
 }
 
-
-
+/**
+ * 更新撤销按钮状态
+ * 根据历史栈长度启用/禁用撤销按钮
+ */
 function updateUndoBtn() {
 	undoBtn.disabled = historyStack.length === 0;
 }
 
+/**
+ * 导出JSON文件
+ * 将路径点和参考平面信息导出为JSON文件
+ */
 function exportJSON() {
 	if (points.length === 0) return;
 	
@@ -1245,6 +927,10 @@ function exportJSON() {
 	URL.revokeObjectURL(a.href);
 }
 
+/**
+ * 导入JSON文件
+ * @param {File} file - JSON文件对象
+ */
 function importJSONFile(file) {
 	if (!file) return;
 	const reader = new FileReader();
@@ -1305,9 +991,14 @@ function importJSONFile(file) {
 	reader.readAsText(file);
 }
 
+/**
+ * 画布鼠标按下事件
+ * @param {MouseEvent} event - 鼠标事件
+ */
 function onCanvasMouseDown(event) {
 	if (event.button !== 0) return;
-	// Selection in edit mode with Shift
+	
+	// 编辑模式下使用Shift进行选择
 	if (isEditMode && event.shiftKey) {
 		raycaster.setFromCamera(mouse, camera);
 		const intersects = raycaster.intersectObjects(draggableObjects);
@@ -1319,19 +1010,42 @@ function onCanvasMouseDown(event) {
 		event.stopImmediatePropagation();
 		return;
 	}
+	
+	// 多选模式下的处理
+	if (isMultiSelectMode) {
+		raycaster.setFromCamera(mouse, camera);
+		const intersects = raycaster.intersectObjects(draggableObjects);
+		
+		if (intersects.length > 0) {
+			// 点击了点标记
+			handleMultiSelect(intersects[0].object);
+		}
+		event.stopImmediatePropagation();
+		return;
+	}
+	
 	isDraggingView = false;
 	mouseDownPos.set(event.clientX, event.clientY);
 }
 
+/**
+ * 画布鼠标移动事件
+ * @param {MouseEvent} event - 鼠标事件
+ */
 function onCanvasMouseMove(event) {
 	mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
 	mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+	
 	if (event.buttons !== 1) return;
 	if (mouseDownPos.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 5) {
 		isDraggingView = true;
 	}
 }
 
+/**
+ * 画布鼠标抬起事件
+ * @param {MouseEvent} event - 鼠标事件
+ */
 function onCanvasMouseUp(event) {
 	if (event.button !== 0) return;
 	if (isDraggingView) return;
@@ -1348,15 +1062,15 @@ function onCanvasMouseUp(event) {
 	if (isContactPointsMode) {
 		handleContactPointSelection();
 	}
-	if (isHyperbolaMode) {
-		handleHyperbolaMouseUp();
-	}
 	if (isParabolaMode) {
 		handleParabolaMouseUp();
 	}
 }
 
-// Contact point selection and path generation
+/**
+ * 处理接触点选择
+ * 选择接触点并生成路径
+ */
 function handleContactPointSelection() {
 	raycaster.setFromCamera(mouse, camera);
 	const intersects = raycaster.intersectObjects(contactPointMarkers);
@@ -1393,115 +1107,25 @@ function handleContactPointSelection() {
 	}
 }
 
-// Hyperbola mode interactions
-function handleHyperbolaMouseUp() {
-	raycaster.setFromCamera(mouse, camera);
-	// 阶段1：选择两个接触点
-	if (hyperbolaSelectedContactPoints.length < 2) {
-		const intersects = raycaster.intersectObjects(contactPointMarkers);
-		if (intersects.length === 0) return;
-		const marker = intersects[0].object;
-		const index = marker.userData.index;
-		// 切换选择
-		const exists = hyperbolaSelectedContactPoints.includes(index);
-		if (exists) {
-			hyperbolaSelectedContactPoints = hyperbolaSelectedContactPoints.filter(i => i !== index);
-			marker.material.color.set(CONTACT_POINT_COLOR);
-			setStatus(`双曲线：已取消接触点 ${index + 1}，当前选择：${hyperbolaSelectedContactPoints.length}/2`);
-			return;
-		}
-		if (hyperbolaSelectedContactPoints.length >= 2) {
-			resetHyperbolaContactSelectionColors();
-			hyperbolaSelectedContactPoints = [];
-		}
-		hyperbolaSelectedContactPoints.push(index);
-		marker.material.color.set(SELECTED_CONTACT_POINT_COLOR);
-		setStatus(`双曲线：已选择接触点 ${index + 1}，当前选择：${hyperbolaSelectedContactPoints.length}/2`);
-		if (hyperbolaSelectedContactPoints.length === 2) {
-			prepareHyperbolaShortCurve();
-			generateHyperbolaPath();
-		}
-	}
-}
 
-function clearHyperbolaWorkingState() {
-	resetHyperbolaContactSelectionColors();
-	hyperbolaSelectedContactPoints = [];
-	hyperbolaShortCurvePoints = [];
-	if (hyperbolaGuideLine) {
-		scene.remove(hyperbolaGuideLine);
-		hyperbolaGuideLine.geometry?.dispose?.();
-		hyperbolaGuideLine.material?.dispose?.();
-		hyperbolaGuideLine = null;
-	}
-}
 
+/**
+ * 清除抛物线工作状态
+ * 清理抛物线相关的所有状态和对象
+ */
 function clearParabolaWorkingState() {
 	parabolaPickedPoints = [];
 	parabolaMarkers.forEach(m => { scene.remove(m); });
 	parabolaMarkers = [];
 }
 
-function resetHyperbolaContactSelectionColors() {
-	if (!contactPointMarkers.length) return;
-	contactPointMarkers.forEach(m => m.material.color.set(CONTACT_POINT_COLOR));
-}
 
-function prepareHyperbolaShortCurve() {
-	const startIndex = hyperbolaSelectedContactPoints[0];
-	const endIndex = hyperbolaSelectedContactPoints[1];
-	const pathPoints = getCurvePointsBetweenIndices(contactPoints, startIndex, endIndex);
-	hyperbolaShortCurvePoints = pathPoints.map(p => p.clone());
-	// 显示引导线
-	if (hyperbolaGuideLine) {
-		scene.remove(hyperbolaGuideLine);
-		hyperbolaGuideLine.geometry?.dispose?.();
-		hyperbolaGuideLine.material?.dispose?.();
-		hyperbolaGuideLine = null;
-	}
-	const g = new THREE.BufferGeometry().setFromPoints(hyperbolaShortCurvePoints);
-	const m = new THREE.LineBasicMaterial({ color: 0x00aaff });
-	hyperbolaGuideLine = new THREE.Line(g, m);
-	scene.add(hyperbolaGuideLine);
-}
 
-function generateHyperbolaPath() {
-	if (hyperbolaSelectedContactPoints.length !== 2 || hyperbolaShortCurvePoints.length < 2) return;
-	// 自动从短曲线上选取3个中间采样点（按弧长25%、50%、75%）
-	const autoMid = pickAutoThreeSamples(hyperbolaShortCurvePoints);
-	// 构造用于拟合的平面：用端点和中间点近似最佳平面
-	const plane = estimateBestFitPlane([hyperbolaShortCurvePoints[0], ...autoMid, hyperbolaShortCurvePoints[hyperbolaShortCurvePoints.length - 1]]);
-	const basis = buildPlaneBasis(plane.normal);
-	const centroid = plane.point;
-	const end1 = toPlane2D(hyperbolaShortCurvePoints[0], centroid, basis.u, basis.v);
-	const end2 = toPlane2D(hyperbolaShortCurvePoints[hyperbolaShortCurvePoints.length - 1], centroid, basis.u, basis.v);
-	const mids2 = autoMid.map(p => toPlane2D(p, centroid, basis.u, basis.v));
-	// 约束拟合：必须通过两个端点；最小二乘拟合中间三个
-	const conic = fitConicConstrainedThrough(end1, end2, mids2);
-	let generated2D = [];
-	if (conic && isHyperbolaConic(conic)) {
-		generated2D = sampleHyperbolaConicConstrained(conic, end1, end2, mids2, smoothPointsCount);
-	} else {
-		// 退化：用短曲线的点进行平滑插值
-		const crv = new THREE.CatmullRomCurve3(hyperbolaShortCurvePoints, false, 'catmullrom', 0.5);
-		const arr = crv.getPoints(smoothPointsCount);
-		saveState();
-		points = arr;
-		redrawScene();
-		setStatus('双曲线拟合失败，已使用平滑曲线替代。');
-		return;
-	}
-	// 映射回3D
-	const generated3D = generated2D.map(p2 => fromPlane2D(p2, centroid, basis.u, basis.v));
-	saveState();
-	points = generated3D;
-	redrawScene();
-	setStatus('双曲线路径已生成（通过两端点，拟合中间三点）。');
-	// 退出/清理工作态但保留模式方便再次生成
-	clearHyperbolaWorkingState();
-}
 
-// Parabola mode interactions
+/**
+ * 处理抛物线模式鼠标抬起事件
+ * 选择三个点并生成抛物线路径
+ */
 function handleParabolaMouseUp() {
 	raycaster.setFromCamera(mouse, camera);
 	const intersects = raycaster.intersectObject(modelMesh);
@@ -1517,6 +1141,10 @@ function handleParabolaMouseUp() {
 	}
 }
 
+/**
+ * 添加抛物线标记
+ * @param {THREE.Vector3} p - 标记位置
+ */
 function addParabolaMarker(p) {
 	const geom = new THREE.SphereGeometry(0.35, 16, 16);
 	const mat = new THREE.MeshBasicMaterial({ color: PARABOLA_MARKER_COLOR });
@@ -1526,6 +1154,12 @@ function addParabolaMarker(p) {
 	parabolaMarkers.push(marker);
 }
 
+/**
+ * 生成抛物线路径
+ * @param {THREE.Vector3} p1 - 第一个点
+ * @param {THREE.Vector3} p2 - 第二个点
+ * @param {THREE.Vector3} p3 - 第三个点
+ */
 function generateParabolaPath(p1, p2, p3) {
 	// 三点定义平面
 	const plane = new THREE.Plane().setFromCoplanarPoints(p1, p2, p3);
@@ -1581,6 +1215,12 @@ function generateParabolaPath(p1, p2, p3) {
 	redrawScene();
 }
 
+/**
+ * 解3x3线性方程组
+ * @param {Array} A - 系数矩阵
+ * @param {Array} b - 常数向量
+ * @returns {Array|null} 解向量或null
+ */
 function solve3x3(A, b) {
 	// 解 Ax=b，直接求逆或克拉默法则
 	const m = A;
@@ -1596,10 +1236,20 @@ function solve3x3(A, b) {
 	return x;
 }
 
+/**
+ * 计算3x3矩阵的行列式
+ * @param {Array} m - 3x3矩阵
+ * @returns {number} 行列式值
+ */
 function det3(m) {
 	return m[0][0]*(m[1][1]*m[2][2]-m[1][2]*m[2][1]) - m[0][1]*(m[1][0]*m[2][2]-m[1][2]*m[2][0]) + m[0][2]*(m[1][0]*m[2][1]-m[1][1]*m[2][0]);
 }
 
+/**
+ * 计算3x3矩阵的逆矩阵
+ * @param {Array} m - 3x3矩阵
+ * @returns {Array|null} 逆矩阵或null
+ */
 function inv3(m) {
 	const d = det3(m);
 	if (Math.abs(d) < 1e-9) return null;
@@ -1623,366 +1273,29 @@ function inv3(m) {
 	return inv;
 }
 
-// Utility: estimate plane, basis, projections
-function estimateBestFitPlane(pts) {
-	// 质心
-	const c = new THREE.Vector3();
-	pts.forEach(p => c.add(p));
-	c.divideScalar(pts.length);
-	// 协方差矩阵
-	let xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
-	for (const p of pts) {
-		const dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
-		xx += dx * dx; xy += dx * dy; xz += dx * dz;
-		yy += dy * dy; yz += dy * dz; zz += dz * dz;
-	}
-	const cov = [
-		[xx, xy, xz],
-		[xy, yy, yz],
-		[xz, yz, zz]
-	];
-	const normal = smallestEigenVector3(cov);
-	return { point: c, normal };
-}
 
-function buildPlaneBasis(normal) {
-	const n = normal.clone().normalize();
-	const tmp = Math.abs(n.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
-	const u = new THREE.Vector3().crossVectors(tmp, n).normalize();
-	const v = new THREE.Vector3().crossVectors(n, u).normalize();
-	return { u, v, n };
-}
 
-function toPlane2D(p, origin, u, v) {
-	const d = new THREE.Vector3().subVectors(p, origin);
-	return { x: d.dot(u), y: d.dot(v) };
-}
 
-function fromPlane2D(p2, origin, u, v) {
-	return new THREE.Vector3().copy(origin).add(u.clone().multiplyScalar(p2.x)).add(v.clone().multiplyScalar(p2.y));
-}
 
-function intersectRayWithPlaneOfPoints(pts) {
-	if (pts.length < 3) return null;
-	const plane = estimateBestFitPlane(pts);
-	const n = plane.normal.clone().normalize();
-	const p0 = plane.point.clone();
-	raycaster.setFromCamera(mouse, camera);
-	const rOrigin = raycaster.ray.origin.clone();
-	const rDir = raycaster.ray.direction.clone();
-	const denom = n.dot(rDir);
-	if (Math.abs(denom) < 1e-6) return null;
-	const t = n.dot(p0.clone().sub(rOrigin)) / denom;
-	if (t < 0) return null;
-	return rOrigin.add(rDir.multiplyScalar(t));
-}
 
-function projectPointToPolyline(p, poly) {
-	if (poly.length < 2) return null;
-	let best = null;
-	let bestDist2 = Infinity;
-	for (let i = 0; i < poly.length - 1; i++) {
-		const a = poly[i];
-		const b = poly[i + 1];
-		const ab = new THREE.Vector3().subVectors(b, a);
-		const ap = new THREE.Vector3().subVectors(p, a);
-		const t = Math.max(0, Math.min(1, ap.dot(ab) / ab.lengthSq()));
-		const q = a.clone().add(ab.multiplyScalar(t));
-		const d2 = q.distanceToSquared(p);
-		if (d2 < bestDist2) { bestDist2 = d2; best = q; }
-	}
-	return best;
-}
 
-function smallestEigenVector3(m) {
-	// Power iteration on inverse via Jacobi for 3x3 symmetric matrix
-	// Using simple Jacobi eigenvalue algorithm
-	let a11 = m[0][0], a12 = m[0][1], a13 = m[0][2];
-	let a22 = m[1][1], a23 = m[1][2];
-	let a33 = m[2][2];
-	let v = [1, 0, 0], w = [0, 1, 0], u = [0, 0, 1];
-	function rotate(p, q, angle) {
-		const c = Math.cos(angle), s = Math.sin(angle);
-		for (const vec of [v, w, u]) {
-			const ip = vec[p], iq = vec[q];
-			vec[p] = c * ip - s * iq;
-			vec[q] = s * ip + c * iq;
-		}
-	}
-	for (let k = 0; k < 10; k++) {
-		// find largest off-diagonal
-		let p = 0, q = 1, max = Math.abs(a12);
-		if (Math.abs(a13) > max) { max = Math.abs(a13); p = 0; q = 2; }
-		if (Math.abs(a23) > max) { max = Math.abs(a23); p = 1; q = 2; }
-		if (max < 1e-9) break;
-		let app, aqq, apq;
-		if (p === 0 && q === 1) { app = a11; aqq = a22; apq = a12; }
-		if (p === 0 && q === 2) { app = a11; aqq = a33; apq = a13; }
-		if (p === 1 && q === 2) { app = a22; aqq = a33; apq = a23; }
-		const phi = 0.5 * Math.atan2(2 * apq, (aqq - app));
-		rotate(p, q, phi);
-		// Update matrix entries approximately (not needed for final eigenvector direction quality)
-		const c = Math.cos(phi), s = Math.sin(phi);
-		function rot(a, b, cval, sval) { const t = cval * a - sval * b; return { x: t, y: sval * a + cval * b }; }
-		if (p === 0 && q === 1) {
-			const r1 = rot(a11, a12, c, s); const r2 = rot(a12, a22, c, s);
-			a11 = r1.x; a12 = r1.y; a22 = r2.y;
-			const r13 = rot(a13, a23, c, s); a13 = r13.x; a23 = r13.y;
-		}
-		if (p === 0 && q === 2) {
-			const r1 = rot(a11, a13, c, s); const r2 = rot(a13, a33, c, s);
-			a11 = r1.x; a13 = r1.y; a33 = r2.y;
-			const r12 = rot(a12, a23, c, s); a12 = r12.x; a23 = r12.y;
-		}
-		if (p === 1 && q === 2) {
-			const r1 = rot(a22, a23, c, s); const r2 = rot(a23, a33, c, s);
-			a22 = r1.x; a23 = r1.y; a33 = r2.y;
-			const r12 = rot(a12, a13, c, s); a12 = r12.x; a13 = r12.y;
-		}
-	}
-	// Smallest eigenvector approximated as the column with smallest variance direction -> pick u,w,v minimal? For simplicity, return normalizing cross of v and w to ensure orthonormal set roughly
-	const ev = new THREE.Vector3(v[0], v[1], v[2]).normalize();
-	const ew = new THREE.Vector3(w[0], w[1], w[2]).normalize();
-	let n = new THREE.Vector3().crossVectors(ev, ew).normalize();
-	if (!Number.isFinite(n.x)) n = new THREE.Vector3(0, 0, 1);
-	return n;
-}
 
-// Conic fit utilities
-function fitConic(pts2) {
-	if (pts2.length < 5) return null;
-	// Build design matrix D
-	const D = [];
-	for (const p of pts2) {
-		const x = p.x, y = p.y;
-		D.push([x * x, x * y, y * y, x, y, 1]);
-	}
-	const svd = svdDecompose(D);
-	if (!svd) return null;
-	const V = svd.V; // columns are right singular vectors
-	const p = V.map(row => row[5]); // last column
-	return { a: p[0], b: p[1], c: p[2], d: p[3], e: p[4], f: p[5] };
-}
 
-function isHyperbolaConic(conic) {
-	const { a, b, c } = conic;
-	return (4 * a * c - b * b) < 0;
-}
 
-function sampleHyperbolaConic(conic, samplePts, count) {
-	// Sample within bbox of samplePts
-	let minX = Infinity, maxX = -Infinity;
-	for (const p of samplePts) { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; }
-	const xs = [];
-	for (let i = 0; i < count; i++) xs.push(minX + (maxX - minX) * (i / (count - 1)));
-	const res = [];
-	const { a, b, c, d, e, f } = conic;
-	for (const x of xs) {
-		// Solve quadratic in y: (c) y^2 + (b x + e) y + (a x^2 + d x + f) = 0
-		const qa = c;
-		const qb = b * x + e;
-		const qc = a * x * x + d * x + f;
-		const disc = qb * qb - 4 * qa * qc;
-		if (disc < 0) continue;
-		const sdisc = Math.sqrt(Math.max(0, disc));
-		const y1 = (-qb + sdisc) / (2 * qa);
-		const y2 = (-qb - sdisc) / (2 * qa);
-		// Pick branch closer to sample median y
-		const medianY = samplePts.map(p => p.y).sort((m, n) => m - n)[Math.floor(samplePts.length / 2)];
-		const y = Math.abs(y1 - medianY) < Math.abs(y2 - medianY) ? y1 : y2;
-		res.push({ x, y });
-	}
-	// Ensure monotonic order by x
-	res.sort((p, q) => p.x - q.x);
-	return res;
-}
 
-// Auto pick 3 internal samples along the polyline by cumulative arc length ratios
-function pickAutoThreeSamples(poly) {
-	const ratios = [0.25, 0.5, 0.75];
-	const cum = [0];
-	let total = 0;
-	for (let i = 1; i < poly.length; i++) {
-		total += poly[i - 1].distanceTo(poly[i]);
-		cum.push(total);
-	}
-	if (total === 0) return [];
-	const res = [];
-	for (const r of ratios) {
-		const target = r * total;
-		// locate segment
-		let j = 1; while (j < cum.length && cum[j] < target) j++;
-		if (j >= cum.length) { res.push(poly[poly.length - 1].clone()); continue; }
-		const segLen = cum[j] - cum[j - 1];
-		const t = segLen > 0 ? (target - cum[j - 1]) / segLen : 0;
-		const p = poly[j - 1].clone().lerp(poly[j], t);
-		res.push(p);
-	}
-	return res;
-}
 
-// Fit general conic with constraints passing through two endpoints; least squares on middle three
-// Conic form: A x^2 + B x y + C y^2 + D x + E y + F = 0 (vector q=[A,B,C,D,E,F])
-function fitConicConstrainedThrough(p1, p2, middlePts) {
-	// Constraint matrix C q = 0 for endpoints
-	function rowFromPoint(pt) { const x = pt.x, y = pt.y; return [x * x, x * y, y * y, x, y, 1]; }
-	const C = [rowFromPoint(p1), rowFromPoint(p2)];
-	// Nullspace of C (dimension 4)
-	const Ns = nullSpace(C);
-	if (!Ns) return null;
-	// Represent q = Ns * z, minimize ||A q|| where A from middle points
-	const A = middlePts.map(rowFromPoint);
-	// Build M = A * Ns, solve min ||M z|| -> eigen of (M^T M)
-	const M = A.map(aRow => {
-		const out = new Array(Ns[0].length).fill(0);
-		for (let j = 0; j < Ns.length; j++) {
-			const coeff = aRow[j];
-			for (let k = 0; k < Ns[0].length; k++) out[k] += coeff * Ns[j][k];
-		}
-		return out;
-	});
-	const MtM = Array.from({ length: Ns[0].length }, () => Array(Ns[0].length).fill(0));
-	for (let i = 0; i < M.length; i++) for (let j = 0; j < MtM.length; j++) for (let k = 0; k < MtM.length; k++) MtM[j][k] += M[i][j] * M[i][k];
-	const eig = eigenSymmetric(MtM);
-	if (!eig) return null;
-	const order = eig.values.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v).map(o => o.i);
-	const z = order.map(i => (i === 0 ? 1 : 0)); // take eigenvector with min eigenvalue; build explicit vector below
-	// Actually need the actual eigenvector column
-	const V = eig.vectors;
-	const zvec = V.map(row => row[order[0]]);
-	// q = Ns * zvec
-	const q = new Array(6).fill(0);
-	for (let j = 0; j < Ns.length; j++) for (let k = 0; k < Ns[0].length; k++) q[j] += Ns[j][k] * zvec[k];
-	return { a: q[0], b: q[1], c: q[2], d: q[3], e: q[4], f: q[5] };
-}
 
-// Compute nullspace basis of matrix C (m x n), return n x r matrix columns as basis
-function nullSpace(C) {
-	const m = C.length; const n = C[0].length;
-	// SVD of C to get V; nullspace are columns where singular value ~ 0
-	const svd = svdDecompose(C);
-	if (!svd) return null;
-	const V = svd.V; // n x n
-	// We need last n - rank columns; with two constraints on general position -> rank 2 -> r=4
-	const r = Math.max(1, n - 2);
-	const Ns = Array.from({ length: n }, () => Array(r).fill(0));
-	for (let j = 0; j < r; j++) {
-		const col = V.map(row => row[n - r + j]);
-		for (let i = 0; i < n; i++) Ns[i][j] = col[i];
-	}
-	return Ns;
-}
 
-// Sample the constrained hyperbola ensuring endpoints are included as first/last samples
-function sampleHyperbolaConicConstrained(conic, end1, end2, mids, count) {
-	// Sample by x between endpoints in 2D; ensure end1->end2 ordering by x
-	let a = end1, b = end2;
-	let reverse = false;
-	if (a.x > b.x) { const t = a; a = b; b = t; reverse = true; }
-	const xs = [];
-	for (let i = 0; i < count; i++) xs.push(a.x + (b.x - a.x) * (i / (count - 1)));
-	const { A, branchYs } = precomputeBranchSelector(conic, mids);
-	const res = [];
-	for (let i = 0; i < xs.length; i++) {
-		const x = xs[i];
-		const ys = solveConicY(conic, x);
-		if (!ys) continue;
-		const y = selectBranch(ys, branchYs);
-		res.push({ x, y });
-	}
-	if (reverse) res.reverse();
-	// Replace first/last exactly with endpoints to enforce pass-through
-	if (res.length) { res[0] = { x: end1.x, y: end1.y }; res[res.length - 1] = { x: end2.x, y: end2.y }; }
-	return res;
-}
 
-function precomputeBranchSelector(conic, mids) {
-	const branchYs = mids.map(p => p.y).sort((a, b) => a - b);
-	return { A: 0, branchYs };
-}
 
-function solveConicY(conic, x) {
-	const { a, b, c, d, e, f } = conic;
-	const qa = c;
-	const qb = b * x + e;
-	const qc = a * x * x + d * x + f;
-	const disc = qb * qb - 4 * qa * qc;
-	if (disc < 0) return null;
-	const s = Math.sqrt(Math.max(0, disc));
-	return [(-qb + s) / (2 * qa), (-qb - s) / (2 * qa)];
-}
 
-function selectBranch(ys, branchYs) {
-	// choose y closer to median of middle samples
-	const median = branchYs[Math.floor(branchYs.length / 2)];
-	return Math.abs(ys[0] - median) < Math.abs(ys[1] - median) ? ys[0] : ys[1];
-}
 
-// Basic SVD via numeric.js-like power method fallback (small sizes)
-function svdDecompose(A) {
-	// Use Gram matrix to get V via eigen of A^T A, then compute U,S lightly. Sufficient to get V's last column.
-	const m = A.length; if (m === 0) return null; const n = A[0].length;
-	// Compute AtA
-	const AtA = Array.from({ length: n }, () => Array(n).fill(0));
-	for (let i = 0; i < m; i++) {
-		for (let j = 0; j < n; j++) {
-			for (let k = 0; k < n; k++) {
-				AtA[j][k] += A[i][j] * A[i][k];
-			}
-		}
-	}
-	// Eigen decomposition of AtA (symmetric)
-	const eig = eigenSymmetric(AtA);
-	if (!eig) return null;
-	// Sort by eigenvalues ascending (smallest gives smallest singular vector)
-	const idx = eig.values.map((v, i) => ({ v, i })).sort((p, q) => p.v - q.v).map(o => o.i);
-	const V = eig.vectors.map(row => idx.map(i => row[i]));
-	return { V };
-}
 
-function eigenSymmetric(M) {
-	const n = M.length;
-	// Jacobi eigenvalue algorithm
-	let A = M.map(row => row.slice());
-	let V = Array.from({ length: n }, (_, i) => {
-		const r = Array(n).fill(0); r[i] = 1; return r;
-	});
-	for (let iter = 0; iter < 50; iter++) {
-		// find largest off-diagonal
-		let p = 0, q = 1, max = Math.abs(A[0][1]);
-		for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
-			const val = Math.abs(A[i][j]);
-			if (val > max) { max = val; p = i; q = j; }
-		}
-		if (max < 1e-10) break;
-		const app = A[p][p], aqq = A[q][q], apq = A[p][q];
-		const phi = 0.5 * Math.atan2(2 * apq, (aqq - app));
-		const c = Math.cos(phi), s = Math.sin(phi);
-		// Rotate A
-		for (let i = 0; i < n; i++) {
-			const aip = A[i][p], aiq = A[i][q];
-			A[i][p] = c * aip - s * aiq;
-			A[i][q] = s * aip + c * aiq;
-		}
-		for (let j = 0; j < n; j++) {
-			const apj = A[p][j], aqj = A[q][j];
-			A[p][j] = c * apj - s * aqj;
-			A[q][j] = s * apj + c * aqj;
-		}
-		A[p][p] = c * c * app - 2 * s * c * apq + s * s * aqq;
-		A[q][q] = s * s * app + 2 * s * c * apq + c * c * aqq;
-		A[p][q] = A[q][p] = 0;
-		// Rotate V
-		for (let i = 0; i < n; i++) {
-			const vip = V[i][p], viq = V[i][q];
-			V[i][p] = c * vip - s * viq;
-			V[i][q] = s * vip + c * viq;
-		}
-	}
-	const values = Array.from({ length: n }, (_, i) => A[i][i]);
-	return { values, vectors: V };
-}
 
+/**
+ * 从接触点生成路径
+ * 根据选中的接触点生成平滑路径
+ */
 function generatePathFromContactPoints() {
 	if (selectedContactPoints.length !== 2) return;
 	
@@ -2012,6 +1325,13 @@ function generatePathFromContactPoints() {
 }
 
 
+/**
+ * 获取两个索引之间的曲线点
+ * @param {Array} contactPoints - 接触点数组
+ * @param {number} startIndex - 起始索引
+ * @param {number} endIndex - 结束索引
+ * @returns {Array} 曲线点数组
+ */
 function getCurvePointsBetweenIndices(contactPoints, startIndex, endIndex) {
 	const n = contactPoints.length;
 	
@@ -2054,7 +1374,11 @@ function getCurvePointsBetweenIndices(contactPoints, startIndex, endIndex) {
 	return resultPoints;
 }
 
-// 沿着曲线对点进行排序
+/**
+ * 沿着曲线对点进行排序
+ * @param {Array} points - 点数组
+ * @returns {Array} 排序后的点数组
+ */
 function sortPointsAlongCurve(points) {
 	if (points.length <= 2) return points;
 	
@@ -2093,7 +1417,12 @@ function sortPointsAlongCurve(points) {
 	return sortedPoints;
 }
 
-// 限制路径点数量
+/**
+ * 限制路径点数量
+ * @param {Array} points - 点数组
+ * @param {number} maxPoints - 最大点数
+ * @returns {Array} 限制后的点数组
+ */
 function limitPathPoints(points, maxPoints) {
 	if (points.length <= maxPoints) {
 		return points;
@@ -2111,7 +1440,11 @@ function limitPathPoints(points, maxPoints) {
 	return resultPoints;
 }
 
-// 生成平滑曲线
+/**
+ * 生成平滑曲线
+ * @param {Array} controlPoints - 控制点数组
+ * @returns {Array} 平滑曲线点数组
+ */
 function generateSmoothCurve(controlPoints) {
 	if (controlPoints.length < 2) return controlPoints;
 	
@@ -2125,7 +1458,10 @@ function generateSmoothCurve(controlPoints) {
 }
 
 
-// U-loop selection and generation
+/**
+ * 处理U型曲选择
+ * @param {Object} marker - 标记对象
+ */
 function handleULoopSelection(marker) {
 	const index = marker.userData.index;
 	const selectionIndex = uLoopSelectionIndices.indexOf(index);
@@ -2157,6 +1493,10 @@ function handleULoopSelection(marker) {
 	generateUloopBtn.disabled = uLoopSelectionIndices.length !== 3;
 }
 
+/**
+ * 取消选择所有点
+ * 清除U型曲选择状态
+ */
 function deselectAllPoints() {
 	uLoopSelectionIndices.forEach(i => {
 		const marker = draggableObjects.find(m => m.userData.index === i);
@@ -2166,6 +1506,119 @@ function deselectAllPoints() {
 	generateUloopBtn.disabled = true;
 }
 
+/**
+ * 清除多选状态
+ * 清除多选点选择状态
+ */
+function clearMultiSelection() {
+	multiSelectedIndices.forEach(i => {
+		const marker = draggableObjects.find(m => m.userData.index === i);
+		if (marker) marker.material.color.set(0xff0000);
+	});
+	multiSelectedIndices = [];
+}
+
+/**
+ * 处理多选点选择
+ * @param {Object} marker - 标记对象
+ */
+function handleMultiSelect(marker) {
+	const index = marker.userData.index;
+	const selectionIndex = multiSelectedIndices.indexOf(index);
+	
+	if (selectionIndex > -1) {
+		// 取消选择
+		multiSelectedIndices.splice(selectionIndex, 1);
+		marker.material.color.set(0xff0000);
+	} else {
+		// 选择点
+		multiSelectedIndices.push(index);
+		marker.material.color.set(MULTI_SELECT_COLOR);
+		
+		// 如果选择了两个或更多点，选择它们之间的所有点
+		if (multiSelectedIndices.length >= 2) {
+			selectPointsBetweenSelected();
+		}
+	}
+	
+	setStatus(`多选模式：已选择 ${multiSelectedIndices.length} 个点`);
+}
+
+/**
+ * 选择已选中点之间的所有点
+ */
+function selectPointsBetweenSelected() {
+	if (multiSelectedIndices.length < 2) return;
+	
+	// 找到最小和最大索引
+	const minIndex = Math.min(...multiSelectedIndices);
+	const maxIndex = Math.max(...multiSelectedIndices);
+	
+	// 选择中间的所有点
+	for (let i = minIndex; i <= maxIndex; i++) {
+		if (!multiSelectedIndices.includes(i)) {
+			multiSelectedIndices.push(i);
+		}
+	}
+	
+	// 更新所有标记的颜色
+	updateMultiSelectColors();
+}
+
+
+/**
+ * 更新多选点颜色
+ */
+function updateMultiSelectColors() {
+	draggableObjects.forEach(marker => {
+		const index = marker.userData.index;
+		if (typeof index !== 'number') return;
+		
+		if (multiSelectedIndices.includes(index)) {
+			marker.material.color.set(MULTI_SELECT_COLOR);
+		} else if (uLoopSelectionIndices.includes(index)) {
+			marker.material.color.set(SELECTION_COLOR_ULOOP);
+		} else {
+			marker.material.color.set(0xff0000);
+		}
+	});
+}
+
+
+/**
+ * 移动选中的点
+ * @param {THREE.Vector3} delta - 移动增量
+ */
+function moveSelectedPoints(delta) {
+	if (multiSelectedIndices.length === 0) return;
+	
+	// 保存状态
+	saveState();
+	
+	// 移动所有选中的点
+	multiSelectedIndices.forEach(index => {
+		if (points[index]) {
+			points[index].add(delta);
+		}
+	});
+	
+	// 更新标记位置
+	multiSelectedIndices.forEach(index => {
+		const marker = draggableObjects.find(m => m.userData.index === index);
+		if (marker && points[index]) {
+			marker.position.copy(points[index]);
+		}
+	});
+	
+	// 更新曲线
+	updateArchCurve();
+}
+
+
+/**
+ * 从选择生成U型曲
+ * 根据选中的三个点生成U型曲
+ */
 function generateULoopFromSelection() {
 	if (uLoopSelectionIndices.length !== 3) return;
 	saveState();
@@ -2187,14 +1640,22 @@ function generateULoopFromSelection() {
 	redrawScene();
 }
 
+/**
+ * 生成U型曲几何
+ * @param {THREE.Vector3} baseStart - 基础起点
+ * @param {THREE.Vector3} baseEnd - 基础终点
+ * @param {THREE.Vector3} y_hat - Y轴方向向量
+ * @param {number} height - 高度
+ * @returns {Array} U型曲点数组
+ */
 function generateULoopGeometry(baseStart, baseEnd, y_hat, height) {
 	// 不添加额外的宽度偏移，直接使用原始端点作为U型曲的基础
-	// Add height to arms
+	// 为臂部添加高度
 	const armTopStart = baseStart.clone().add(y_hat.clone().multiplyScalar(height));
 	const armTopEnd = baseEnd.clone().add(y_hat.clone().multiplyScalar(height));
 	
-	// Apply end distance offset (move away from tissue surface) - fixed value since UI was removed
-	const endOffset = y_hat.clone().multiplyScalar(1.0); // Using default value of 1.0mm
+	// 应用端距离偏移（远离组织表面）- 固定值，因为UI已移除
+	const endOffset = y_hat.clone().multiplyScalar(1.0); // 使用默认值1.0mm
 	armTopStart.add(endOffset);
 	armTopEnd.add(endOffset);
 	
@@ -2202,7 +1663,7 @@ function generateULoopGeometry(baseStart, baseEnd, y_hat, height) {
 	armTopStart.userData = { type: 'uloop' };
 	loopPoints.push(armTopStart);
 	
-	// Generate semicircle between arm tops
+	// 在臂顶部之间生成半圆
 	const semicenter = armTopStart.clone().lerp(armTopEnd, 0.5);
 	const startVec = new THREE.Vector3().subVectors(armTopStart, semicenter);
 	const x_hat = new THREE.Vector3().subVectors(baseEnd, baseStart).normalize();
@@ -2227,7 +1688,13 @@ function generateULoopGeometry(baseStart, baseEnd, y_hat, height) {
 	return loopPoints;
 }
 
-// 新函数：从三个点生成U型曲
+/**
+ * 从三个点生成U型曲
+ * @param {THREE.Vector3} p_start - 起点
+ * @param {THREE.Vector3} p_mid - 中间点
+ * @param {THREE.Vector3} p_end - 终点
+ * @returns {Array} U型曲点数组
+ */
 function generateULoopFromThreePoints(p_start, p_mid, p_end) {
 	// 计算三个点所在平面的法线
 	const v1 = new THREE.Vector3().subVectors(p_mid, p_start);
@@ -2256,7 +1723,10 @@ function generateULoopFromThreePoints(p_start, p_mid, p_end) {
 	return newPoints;
 }
 
-// Undo stack
+/**
+ * 保存状态到撤销栈
+ * 保存当前路径点状态
+ */
 function saveState() {
 	const state = {
 		points: points.map(p => {
@@ -2269,10 +1739,18 @@ function saveState() {
 	updateUndoBtn();
 }
 
+/**
+ * 如果有路径点则保存状态
+ * 检查是否有路径点，如果有则保存状态
+ */
 function saveStateIfPoints() {
 	if (points.length > 0) saveState();
 }
 
+/**
+ * 撤销操作
+ * 恢复到上一个状态
+ */
 function undo() {
 	if (historyStack.length === 0) return;
 	const prev = historyStack.pop();
@@ -2286,7 +1764,10 @@ function undo() {
 	redrawScene();
 }
 
-// Parameter management
+/**
+ * 加载参数
+ * 从本地存储加载保存的参数
+ */
 function loadParameters() {
 	try {
 		const saved = localStorage.getItem(PARAMS_STORAGE_KEY);
@@ -2302,6 +1783,10 @@ function loadParameters() {
 	}
 }
 
+/**
+ * 保存参数
+ * 将当前参数保存到本地存储
+ */
 function saveParameters() {
 	try {
 		const params = {
@@ -2316,6 +1801,10 @@ function saveParameters() {
 	}
 }
 
+/**
+ * 显示设置模态框
+ * 显示参数设置对话框
+ */
 function showSettingsModal() {
 	wireDiameterInput.value = (wireRadius * 2).toFixed(1);
 	markerDiameterInput.value = (markerRadius * 2).toFixed(1);
@@ -2324,10 +1813,18 @@ function showSettingsModal() {
 	settingsModal.classList.remove('hidden');
 }
 
+/**
+ * 隐藏设置模态框
+ * 隐藏参数设置对话框
+ */
 function hideSettingsModal() {
 	settingsModal.classList.add('hidden');
 }
 
+/**
+ * 保存设置
+ * 保存用户设置的参数
+ */
 function saveSettings() {
 	const newWireDiameter = parseFloat(wireDiameterInput.value);
 	const newMarkerDiameter = parseFloat(markerDiameterInput.value);
@@ -2337,13 +1834,17 @@ function saveSettings() {
 	if (!isNaN(newWireDiameter) && newWireDiameter > 0) wireRadius = newWireDiameter / 2;
 	if (!isNaN(newMarkerDiameter) && newMarkerDiameter > 0) markerRadius = newMarkerDiameter / 2;
 	if (!isNaN(newControlPoints) && newControlPoints >= 3 && newControlPoints <= 20) controlPointsCount = newControlPoints;
-	if (!isNaN(newSmoothPoints) && newSmoothPoints >= 20 && newSmoothPoints <= 200) smoothPointsCount = newSmoothPoints;
+	if (!isNaN(newSmoothPoints) && newSmoothPoints >= 5 && newSmoothPoints <= 200) smoothPointsCount = newSmoothPoints;
 
 	saveParameters();
 	redrawScene();
 	hideSettingsModal();
 }
 
+/**
+ * 绑定事件
+ * 为所有UI元素绑定事件监听器
+ */
 function wireEvents() {
 	stlInput.addEventListener('change', (e) => loadSTLFile(e.target.files?.[0]));
 	jsonImport.addEventListener('change', (e) => importJSONFile(e.target.files?.[0]));
@@ -2364,8 +1865,6 @@ function wireEvents() {
 			toggleContactPointsMode();
 		} else if (mode === 'parabola') {
 			if (isContactPointsMode) toggleContactPointsMode();
-			if (isHyperbolaMode) exitHyperbolaMode();
-			if (isAIGenerationMode) exitAIGenerationMode();
 			enterParabolaMode();
 		} else if (mode === 'ai-generation') {
 			if (isContactPointsMode) toggleContactPointsMode();
@@ -2375,9 +1874,6 @@ function wireEvents() {
 		} else {
 			if (isContactPointsMode) {
 				toggleContactPointsMode(); // 退出接触点模式
-			}
-			if (isHyperbolaMode) {
-				exitHyperbolaMode();
 			}
 			if (isParabolaMode) {
 				exitParabolaMode();
@@ -2390,35 +1886,36 @@ function wireEvents() {
 	});
 	toggleDrawBtn.addEventListener('click', () => toggleDrawMode());
 	toggleEditBtn.addEventListener('click', () => toggleEditMode());
+	toggleMultiSelectBtn.addEventListener('click', () => toggleMultiSelectMode());
 	clearAllBtn.addEventListener('click', () => { saveStateIfPoints(); clearDrawing(); });
 	generateUloopBtn.addEventListener('click', () => generateULoopFromSelection());
 	undoBtn.addEventListener('click', () => undo());
 	openSettingsBtn.addEventListener('click', showSettingsModal);
 	cancelSettingsBtn.addEventListener('click', hideSettingsModal);
 	saveSettingsBtn.addEventListener('click', saveSettings);
-	
-	// AI Mode event listeners
-	generateAiPathBtn.addEventListener('click', generateAIPath);
-	exportContactPointsBtn.addEventListener('click', exportContactPointsToJSON);
-	exportAiResponseBtn.addEventListener('click', exportLastAIResponse);
-	geminiApiKeyInput.addEventListener('input', updateAIModeButtons);
-	aiPromptInput.addEventListener('input', () => {
-		// 可以在这里添加实时验证或其他逻辑
-	});
-	
-	// Design UI locked until plane confirmed
+
+	// 设计UI在平面确认前被锁定
 	disableDesignUI(true);
 }
 
+/**
+ * 动画循环
+ * 渲染场景并请求下一帧
+ */
 function animate() {
 	restartIfContextLost();
 	renderer.render(scene, camera);
 	requestAnimationFrame(animate);
 }
 
+/**
+ * 重启上下文丢失
+ * 无操作占位符，为某些浏览器的鲁棒性保留
+ */
 function restartIfContextLost() {
-	// no-op placeholder, reserved for robustness on some browsers
+	// 无操作占位符，为某些浏览器的鲁棒性保留
 }
 
+// 初始化场景和事件
 initScene();
 wireEvents();

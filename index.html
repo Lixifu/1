@@ -61,7 +61,7 @@
                         <option value="ai-generation">AI生成路径</option>
                     </select>
                 </div>
-                <p class="text-[11px] text-gray-400 mb-1">提示：编辑模式下按Shift并单击点可选择三个端点（起点、底部端点、终点）用于生成U型曲。接触点模式下可选择两个接触点生成路径。抛物线模式下点击选择3个点生成一条抛物线路径。AI生成模式下将自动分析接触点并生成最优路径。</p>
+                <p class="text-[11px] text-gray-400 mb-1">提示：编辑模式下按Shift并单击点可选择三个端点（起点、底部端点、终点）用于生成U型曲。多选模式下点击选择点，选择两个点后它们之间的所有点都会自动选中，然后拖拽移动。接触点模式下可选择两个接触点生成路径。抛物线模式下点击选择3个点生成一条抛物线路径。</p>
                 <p id="status" class="text-xs text-gray-300 h-5 mb-2">请选择操作模式。</p>
                 
                 <!-- AI Generation Mode UI -->
@@ -89,6 +89,7 @@
                 <div class="grid grid-cols-2 gap-2">
                     <button id="toggle-draw" class="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>开始绘制</button>
                     <button id="toggle-edit" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>编辑点</button>
+                    <button id="toggle-multi-select" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>多选模式</button>
                     <button id="generate-uloop" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>生成U型曲</button>
                     <button id="undo" class="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-2 px-3 rounded disabled:opacity-50" disabled>撤销（Ctrl+Z）</button>
                     <button id="clear-all" class="col-span-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-3 rounded" disabled>清除全部</button>
@@ -116,7 +117,7 @@
                 </div>
                 <div>
                     <label for="smooth-points-input" class="block text-sm font-medium text-gray-300">平滑曲线点数</label>
-                    <input type="number" id="smooth-points-input" step="10" min="20" max="200" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    <input type="number" id="smooth-points-input" step="10" min="5" max="200" class="mt-1 block w-full bg-gray-700 border border-gray-600 rounded-md shadow-sm py-2 px-3 text-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
                 </div>
 
             </div>
